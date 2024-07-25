@@ -57,17 +57,15 @@ int main(int argc, char** argv) {
     CL_CHECK(clBuildProgram(program, 1, &device_id, NULL, NULL, NULL));
 
     // 创建内核对象
-    kernel = clCreateKernel(program, "mma", NULL);
+    kernel = clCreateKernel(program, "mma_new", NULL);
 
     // 创建缓冲区
     int size = 32;//32个thread/work-item
-    int datasize = size * 10;//128即可
+    int datasize = size * 10;
     size_t nbytes = sizeof(float) * datasize;
-    // input_buffer = clCreateBuffer(context, CL_MEM_READ_ONLY, nbytes, NULL, NULL);
     A_buffer = clCreateBuffer(context, CL_MEM_READ_ONLY, nbytes, NULL, NULL);
     B_buffer = clCreateBuffer(context, CL_MEM_READ_ONLY, nbytes, NULL, NULL);
     C_buffer = clCreateBuffer(context, CL_MEM_READ_WRITE, nbytes, NULL, NULL);
-    // output_buffer = clCreateBuffer(context, CL_MEM_WRITE_ONLY, nbytes, NULL, NULL);
 
     // 设置内核参数
     clSetKernelArg(kernel, 0, sizeof(A_buffer), &A_buffer);
