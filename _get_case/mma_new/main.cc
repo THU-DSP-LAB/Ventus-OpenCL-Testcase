@@ -3,6 +3,12 @@
 #include <stdlib.h>
 #include <vector>
 #include <chrono>
+#include <fstream>
+#include <sstream>
+#include <string>
+#include <netinet/in.h>
+#include <iostream>
+
 
 // 检查OpenCL调用的宏
 #define CL_CHECK(err) if(err != CL_SUCCESS) { printf("OpenCL Error: %d\n", err); exit(-1); }
@@ -25,6 +31,53 @@ int read_kernel_file(const char* filename, char** kernel_bin, size_t* kernel_siz
 
     return 0;
 }
+
+// Function to remove the 'h' prefix from the string
+std::string removeHPrefix(const std::string& str) {
+    if (str.size() >= 1 && str[0] == 'h') {
+        return str.substr(1);
+    }
+    return str;
+}
+
+// Function to convert an octal string to a uint32_t
+uint32_t octalStringToUint32(const std::string& octalStr) {
+    std::string trimmedStr = removeHPrefix(octalStr);
+
+    // std::cout << trimmedStr<<" - ";
+
+    std::stringstream ss;
+    uint32_t value;
+    ss << std::hex << trimmedStr;
+    ss >> value;
+    // std::cout << value<<" * ";
+    return value;
+}
+
+// Function to read the file and parse the octal strings into uint32_t
+std::vector<uint32_t> parseOctalFile(const std::string& filePath, size_t size) {
+    std::ifstream file(filePath);
+    if (!file.is_open()) {
+        throw std::runtime_error("Failed to open file: " + filePath);
+    }
+
+    std::string line;
+    std::getline(file, line);
+
+    std::istringstream iss(line);
+    std::vector<uint32_t> values;
+
+    std::string token;
+    while (iss >> token) {
+        values.push_back(octalStringToUint32(token));
+    }
+
+    std::vector<uint32_t> padded(values.begin(), values.end());
+    padded.resize(size, 0);  // Resize the vector and fill with zeros if necessary
+    
+    return padded;
+}
+
 
 int main(int argc, char** argv) {
     // 初始化OpenCL平台和设备
@@ -86,10 +139,20 @@ int main(int argc, char** argv) {
     }
     printf("\n");
 
+    std::string filePath = "./testData_888/RA.txt";
+    std::vector<uint32_t> inA = parseOctalFile(filePath,datasize);
+    filePath = "./testData_888/RB.txt";
+    std::vector<uint32_t> inB = parseOctalFile(filePath,datasize);
+    filePath = "./testData_888/RC.txt";
+    std::vector<uint32_t> inC = parseOctalFile(filePath,datasize); 
+    for (const auto& value : inC) {
+        std::cout << std::hex << value << " ";
+    }
+
     // 将输入数据拷贝到设备端
-    CL_CHECK(clEnqueueWriteBuffer(queue, A_buffer, CL_TRUE, 0, nbytes, input.data(), 0, NULL, NULL));
-    CL_CHECK(clEnqueueWriteBuffer(queue, B_buffer, CL_TRUE, 0, nbytes, input.data(), 0, NULL, NULL));
-    CL_CHECK(clEnqueueWriteBuffer(queue, C_buffer, CL_TRUE, 0, nbytes, input.data(), 0, NULL, NULL));
+    CL_CHECK(clEnqueueWriteBuffer(queue, A_buffer, CL_TRUE, 0, nbytes, inA.data(), 0, NULL, NULL));
+    CL_CHECK(clEnqueueWriteBuffer(queue, B_buffer, CL_TRUE, 0, nbytes, inB.data(), 0, NULL, NULL));
+    CL_CHECK(clEnqueueWriteBuffer(queue, C_buffer, CL_TRUE, 0, nbytes, inC.data(), 0, NULL, NULL));
 
 
     // 设置工作项和工作组的大小

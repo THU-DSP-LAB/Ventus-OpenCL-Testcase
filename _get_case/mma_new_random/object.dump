@@ -83,11 +83,11 @@ Disassembly of section .text:
 800000e0: 57 30 01 96  	vsll.vi	v0, v0, 2
 800000e4: 83 22 41 ff  	lw	t0, -12(sp)
 800000e8: d7 c0 02 02  	vadd.vx	v1, v0, t0
-800000ec: fb a0 00 00  	vlw12.v	v1, 0(v1)
-800000f0: 83 22 81 ff  	lw	t0, -8(sp)
-800000f4: 57 c1 02 02  	vadd.vx	v2, v0, t0
+800000ec: 83 22 81 ff  	lw	t0, -8(sp)
+800000f0: 57 c1 02 02  	vadd.vx	v2, v0, t0
+800000f4: 83 22 c1 ff  	lw	t0, -4(sp)
 800000f8: 7b 21 01 00  	vlw12.v	v2, 0(v2)
-800000fc: 83 22 c1 ff  	lw	t0, -4(sp)
+800000fc: fb a0 00 00  	vlw12.v	v1, 0(v1)
 80000100: 57 c0 02 02  	vadd.vx	v0, v0, t0
 80000104: 0b c0 01 04  	barrier	x0, x0, 3
 80000108: e1 40 11 00  	<unknown>

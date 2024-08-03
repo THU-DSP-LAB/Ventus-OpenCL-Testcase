@@ -1,13 +1,13 @@
-__kernel void mma_new(__global float *a, __global float *b, __global float *c,
-                  int n) {
+__kernel void mma_new(__global uint *a, __global uint *b, __global uint *c) {
   int tid = get_global_id(0);
-  if (tid < n) {
-    float Ai = a[tid];
-    float Bi = b[tid];
-    float Ci = c[tid];
-    __asm__ __volatile__(".insn r 0x61, 0x4, 0x0, %0, %1, %2"
-                         : "=vr"(Ci)
-                         : "vr"(Bi), "vr"(Ai));
-    c[tid] = Ci;
-  }
+  uint Ai = a[tid];
+  uint Bi = b[tid];
+  uint Ci = c[tid];
+  barrier(CLK_LOCAL_MEM_FENCE | CLK_GLOBAL_MEM_FENCE);
+  __asm__ __volatile__(".insn r 0x61, 0x4, 0x0, %0, %1, %2"
+                       : "=vr"(Ci)
+                       : "vr"(Bi), "vr"(Ai));
+  barrier(CLK_LOCAL_MEM_FENCE | CLK_GLOBAL_MEM_FENCE);
+  c[tid] = Ci;
+
 }
