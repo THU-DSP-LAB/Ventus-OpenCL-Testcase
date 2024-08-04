@@ -132,12 +132,12 @@ int main(int argc, char** argv) {
 
     // 初始化输入数据
     // int size = size * 256;
-    std::vector<float> input(datasize);
-    // 初始化input为0~100的随机浮点数
-    for(int i = 0; i < datasize; i++){
-      input[i] = static_cast<float>(rand() % 101);
-    }
-    printf("\n");
+    // std::vector<float> input(datasize);
+    // // 初始化input为0~100的随机浮点数
+    // for(int i = 0; i < datasize; i++){
+    //   input[i] = static_cast<float>(rand() % 101);
+    // }
+    // printf("\n");
 
     std::string filePath = "./testData_888/RA.txt";
     std::vector<uint32_t> inA = parseOctalFile(filePath,datasize);

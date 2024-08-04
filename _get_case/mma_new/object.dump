@@ -90,7 +90,7 @@ Disassembly of section .text:
 800000fc: 83 22 c1 ff  	lw	t0, -4(sp)
 80000100: 57 c0 02 02  	vadd.vx	v0, v0, t0
 80000104: 0b c0 01 04  	barrier	x0, x0, 3
-80000108: e1 40 11 00  	<unknown>
+80000108: e1 c0 20 00  	<unknown>
 8000010c: 0b c0 01 04  	barrier	x0, x0, 3
 80000110: 7b 60 10 00  	vsw12.v	v1, 0(v0)
 80000114: 83 20 01 ff  	lw	ra, -16(sp)
