@@ -1,5 +1,6 @@
 import struct
 import numpy as np
+import os
 
 dec_float = 5.9
 
@@ -14,6 +15,12 @@ def getFP16Str(dec_float=5.9):
     # print(dec_float.tobytes())
     return hexa#str(dec_float.tobytes())#hexa
 
+def getFP32Str(float_num):
+    # 将浮点数转换为4个字节的二进制数据
+    binary_data = struct.pack('f', float_num)
+    # 将二进制数据转换为十六进制字符串
+    hex_string = binary_data.hex()
+    return hex_string
 
 def Hex2FP16(hexa: str):
     y = struct.pack("H", int(hexa, 16))
@@ -29,40 +36,43 @@ def MatFP16ToHexString(a):
             a_str.append('h'+getFP16Str(j))
     return a_str
 
+def MatFP32ToHexString(a):
+    a_str = []
+    for i in a:
+        for j in i:
+            a_str.append('h'+getFP32Str(j))
+    return a_str
 
-def MatABCD2Register(a, b, c, d, thread: int = 32):
+def MatABCD2Register(a, b, c, d, thread: int = 32, xLen = 32):
     Register_A = ['h' for i in range(thread)]
     Register_B = ['h' for i in range(thread)]
     Register_C = ['h' for i in range(thread)]
     Register_D = ['h' for i in range(thread)]
     for i in range(thread):
-        Register_A[i] += (a[2 * i + 1 + 64] + a[2 * i + 64] + a[2 * i + 1] + a[2 * i])
-        Register_B[i] += ('0000' + '0000' + b[2 * i + 1] + b[2 * i])
-        Register_C[i] += (c[2 * i + 1 + 64] + c[2 * i + 64] + c[2 * i + 1] + c[2 * i])
-        Register_D[i] += (d[2 * i + 1 + 64] + d[2 * i + 64] + d[2 * i + 1] + d[2 * i])
-
+        if xLen ==64:
+            Register_A[i] += (a[2 * i + 1 + 64] + a[2 * i + 64] + a[2 * i + 1] + a[2 * i])
+            Register_B[i] += ('0000' + '0000' + b[2 * i + 1] + b[2 * i])
+            Register_C[i] += (c[2 * i + 1 + 64] + c[2 * i + 64] + c[2 * i + 1] + c[2 * i])
+            Register_D[i] += (d[2 * i + 1 + 64] + d[2 * i + 64] + d[2 * i + 1] + d[2 * i])
+        elif xLen == 32:
+            Register_A[i] += (a[2 * i + 1] + a[2 * i])
+            Register_B[i] += (b[2 * i + 1] + b[2 * i])
+            Register_C[i] += (c[2 * i + 1] + c[2 * i])
+            Register_D[i] += (d[2 * i + 1] + d[2 * i])
     return Register_A, Register_B, Register_C, Register_D
 
 
-def getMatABCD(m: int, n: int, k: int,Num=0.0625):
-    a = (np.random.randint(0, 6, size=(m, k))*Num).astype(np.float16)
-    b = (np.random.randint(0, 6, size=(k, n))*Num).astype(np.float16)
-    c = (np.random.randint(0, 6, size=(m, n))*Num).astype(np.float16)
-
-    # a = (np.random.randint(0, 6, size=(m, k))).astype(np.float16)
-    # b = (np.random.randint(0, 6, size=(k, n))).astype(np.float16)
-    # c = (np.random.randint(0, 6, size=(m, n))).astype(np.float16)
-
-    # a = np.random.randn(m, k).astype(np.float16)
-    # b = np.random.randn(k, n).astype(np.float16)
-    # c = np.random.randn(m, n).astype(np.float16)
+def getMatABCD(m: int, n: int, k: int, result_path):
+    a = np.random.randn(m, k).astype(np.float16)
+    b = np.random.randn(k, n).astype(np.float16)
+    c = np.random.randn(m, n).astype(np.float32)
 
     d = np.dot(a, b) + c
     print(d.dtype, d)
-    np.savetxt('testData_848/a.txt', a)
-    np.savetxt('testData_848/b.txt', b)
-    np.savetxt('testData_848/c.txt', c)
-    np.savetxt('testData_848/d.txt', d)
+    np.savetxt(os.path.join(result_path, 'a.txt'), a)
+    np.savetxt(os.path.join(result_path, 'b.txt'), b)
+    np.savetxt(os.path.join(result_path, 'c.txt'), c)
+    np.savetxt(os.path.join(result_path, 'd.txt'), d)
 
     print('Save Done!')
     return a, b, c, d
@@ -77,26 +87,32 @@ def strArr_Save(str_array, fname: str):
 
 
 if __name__ == '__main__':
-    a, b, c, d = getMatABCD(8, 4, 8)
-    # print(getFP16Str(0))
-    # a = np.loadtxt('testData/a.txt')
-    # b = np.loadtxt('testData/b.txt')
-    # c = np.loadtxt('testData/c.txt')
-    d = np.dot(a, b) + c# np.loadtxt('testData/d.txt')
-    # np.savetxt('testData/d.txt',d)
-    # print(np.dot(a, b) + c)
+    # print(getFP32Str(5.9))
+    result_path = 'testData_848_mix'
+    if not os.path.exists(result_path):
+        os.makedirs(result_path)
 
-    # d = np.loadtxt('testData/d_torch.txt')
+    if os.path.exists(os.path.join(result_path, 'a.txt')):
+        a = np.loadtxt(os.path.join(result_path, 'a.txt'))
+        b = np.loadtxt(os.path.join(result_path, 'b.txt'))
+        c = np.loadtxt(os.path.join(result_path, 'c.txt'))
+        # d = np.dot(a, b) + c
+        # np.savetxt(os.path.join(result_path, 'd.txt'), d)
+        d = np.loadtxt(os.path.join(result_path, 'd.txt'))
+    else:
+        a, b, c, d = getMatABCD(8, 4, 8,result_path)
+        print(getFP16Str(0))
+        print("Get new data.")
 
     a_str = MatFP16ToHexString(a)
     b_str = MatFP16ToHexString(b.T)
-    c_str = MatFP16ToHexString(c)
-    d_str = MatFP16ToHexString(d)
+    c_str = MatFP32ToHexString(c)
+    d_str = MatFP32ToHexString(d)
     # print(a_str)
     # print(len(a_str))
     # RA, RB, RC, RD = MatABCD2Register(a_str, b_str, c_str, d_str)
-    strArr_Save(a_str, 'testData_848/RA.txt')
-    strArr_Save(b_str, 'testData_848/RB.txt')
-    strArr_Save(c_str, 'testData_848/RC.txt')
-    strArr_Save(d_str, 'testData_848/RD.txt')
-    strArr_Save(d_str, 'testData_848/RD_torch.txt')
+    strArr_Save(a_str, os.path.join(result_path,'RA.txt'))
+    strArr_Save(b_str, os.path.join(result_path,'RB.txt'))
+    strArr_Save(c_str, os.path.join(result_path,'RC.txt'))
+    strArr_Save(d_str, os.path.join(result_path,'RD.txt'))
+    # strArr_Save(d_str, os.path.join(result_path,'RD_torch.txt'))
