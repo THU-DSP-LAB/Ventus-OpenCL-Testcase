@@ -15,9 +15,16 @@ def getFP16Str(dec_float=5.9):
     # print(dec_float.tobytes())
     return hexa#str(dec_float.tobytes())#hexa
 
-def getFP32Str(float_num):
-    # 将浮点数转换为4个字节的二进制数据
-    binary_data = struct.pack('f', float_num)
+# def getFP32Str(float_num):
+#     # 将浮点数转换为4个字节的二进制数据
+#     binary_data = struct.pack('f', float_num)
+#     # 将二进制数据转换为十六进制字符串
+#     hex_string = binary_data.hex()
+#     return hex_string
+
+def getFP32Str(float_value):
+    # 将浮点数转换为4字节的二进制格式
+    binary_data = struct.pack('!f', float_value)
     # 将二进制数据转换为十六进制字符串
     hex_string = binary_data.hex()
     return hex_string
@@ -67,7 +74,9 @@ def getMatABCD(m: int, n: int, k: int, result_path):
     b = np.random.randn(k, n).astype(np.float16)
     c = np.random.randn(m, n).astype(np.float32)
 
-    d = np.dot(a, b) + c
+    d = np.dot(a, b).astype(np.float16)
+    d = (d+ c).astype(np.float32)
+
     print(d.dtype, d)
     np.savetxt(os.path.join(result_path, 'a.txt'), a)
     np.savetxt(os.path.join(result_path, 'b.txt'), b)
@@ -99,6 +108,7 @@ if __name__ == '__main__':
         # d = np.dot(a, b) + c
         # np.savetxt(os.path.join(result_path, 'd.txt'), d)
         d = np.loadtxt(os.path.join(result_path, 'd.txt'))
+        print(np.dot(a,b))
     else:
         a, b, c, d = getMatABCD(8, 4, 8,result_path)
         print(getFP16Str(0))
