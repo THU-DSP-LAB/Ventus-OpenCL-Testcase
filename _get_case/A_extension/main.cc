@@ -90,35 +90,19 @@ int main(int argc, char** argv) {
         fprintf(stderr, "Memory allocation failed.\n");
         exit(-1);
     }
-    // // int *input = nullptr;
-    
-    // // 使用 while 循环确保内存对齐
-    // int *data = nullptr;
-    // void *raw_data = nullptr;
-    // while (true) {
-    //     raw_data = malloc(sizeof(int) * datasize + ALIGNMENT);
-    //     if (raw_data == nullptr) {
-    //         fprintf(stderr, "Memory allocation failed, retrying...\n");
-    //         continue;
-    //     }
-
-    //     // 手动对齐
-    //     data = (int *)(((uintptr_t)raw_data + ALIGNMENT - 1) & ~(ALIGNMENT - 1));
-
-    //     // 检查对齐
-    //     if (((uintptr_t)data & (ALIGNMENT - 1)) == 0) {
-    //         break;
-    //     } else {
-    //         fprintf(stderr, "Memory not aligned, retrying...\n");
-    //         free(raw_data);
-    //     }
-    // }
     
     // 初始化input为0~100的随机浮点数
     for(int i = 0; i < datasize; i++){
-      input[i] = static_cast<int>(rand() % 101);
+      input[i] = static_cast<int>(1);//(rand() % 1);
     }
     printf("\n");
+    // 初始化input为0~100的随机浮点数
+    printf("init value\n");
+    for(int i = 0; i < datasize; i++){
+    //   print(input[i] = static_cast<int>(rand() % 1);
+        printf("%d ", input[i]);
+        // std::cout << input[i] << " ";
+    }
 
     // 将输入数据拷贝到设备端
     CL_CHECK(clEnqueueWriteBuffer(queue, A_buffer, CL_TRUE, 0, nbytes, input.data(), 0, NULL, NULL));
