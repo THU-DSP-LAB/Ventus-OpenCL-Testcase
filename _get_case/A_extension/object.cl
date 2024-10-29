@@ -24,7 +24,7 @@ __kernel void A_extension(__global int *data, __global int *b, __global int *c) 
                       : "vr"(0x0), "vr"(&data[id])
                       : "memory");
   value = value+1;
-  temp = data[id]+1;
+  temp = 1;//data[id]+1;
 
   // 模拟 sc.w
   // __asm__ __volatile__(

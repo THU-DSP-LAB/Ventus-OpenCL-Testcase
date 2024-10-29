@@ -88,9 +88,9 @@ Disassembly of section .text:
 800000f4: 57 40 03 02  	vadd.vx	v0, v0, t1
 800000f8: 0b 20 00 00  	regext	zero, zero, 0
 800000fc: af a0 00 10  	lr.w	v1, (v1)
-80000100: 7b 21 00 00  	vlw12.v	v2, 0(v0)
-80000104: d7 b0 10 02  	vadd.vi	v1, v1, 1
-80000108: 57 b1 20 02  	vadd.vi	v2, v2, 1
+80000100: d7 b0 10 02  	vadd.vi	v1, v1, 1
+80000104: 93 02 10 00  	li	t0, 1
+80000108: 57 c1 02 5e  	vmv.v.x	v2, t0
 8000010c: 0b 20 80 00  	regext	zero, zero, 8
 80000110: 2b 2e 20 fe  	vsw.v	v2, -4(v0)
 80000114: 93 02 c2 ff  	addi	t0, tp, -4
