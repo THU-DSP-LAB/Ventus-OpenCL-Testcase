@@ -110,7 +110,7 @@ int main(int argc, char** argv) {
     CL_CHECK(clBuildProgram(program, 1, &device_id, NULL, NULL, NULL));
 
     // 创建内核对象
-    kernel = clCreateKernel(program, "Linear", NULL);
+    kernel = clCreateKernel(program, "Convolution", NULL);
 
     // 创建缓冲区
     int size = 32;//32个thread/work-item

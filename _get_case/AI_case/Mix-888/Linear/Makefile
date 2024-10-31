@@ -6,7 +6,7 @@
 
 # include ../common.mk
 
-include ../common/make.config
+include ../../../common/make.config
 TYPE = GPU
 CC = clang++
 CC_FLAGS = -g -O2 -std=c++11

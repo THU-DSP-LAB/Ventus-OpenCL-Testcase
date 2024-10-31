@@ -87,7 +87,7 @@ int main(int argc, char** argv) {
     cl_command_queue queue;
     cl_program program;
     cl_kernel kernel;
-    cl_mem A_buffer, B_buffer, C_buffer;
+    cl_mem A1_buffer,A2_buffer, B_buffer, C1_buffer,C2_buffer;
     size_t kernel_size;
     char* kernel_bin;
 
@@ -116,14 +116,17 @@ int main(int argc, char** argv) {
     int size = 32;//32个thread/work-item
     int datasize = size * 10;
     size_t nbytes = sizeof(float) * datasize;
-    A_buffer = clCreateBuffer(context, CL_MEM_READ_ONLY, nbytes, NULL, NULL);
+    A1_buffer = clCreateBuffer(context, CL_MEM_READ_ONLY, nbytes, NULL, NULL);
     B_buffer = clCreateBuffer(context, CL_MEM_READ_ONLY, nbytes, NULL, NULL);
-    C_buffer = clCreateBuffer(context, CL_MEM_READ_WRITE, nbytes, NULL, NULL);
-
+    C1_buffer = clCreateBuffer(context, CL_MEM_READ_WRITE, nbytes, NULL, NULL);
+    A2_buffer = clCreateBuffer(context, CL_MEM_READ_ONLY, nbytes, NULL, NULL);
+    C2_buffer = clCreateBuffer(context, CL_MEM_READ_WRITE, nbytes, NULL, NULL);
     // 设置内核参数
-    clSetKernelArg(kernel, 0, sizeof(A_buffer), &A_buffer);
-    clSetKernelArg(kernel, 1, sizeof(B_buffer), &B_buffer);
-    clSetKernelArg(kernel, 2, sizeof(C_buffer), &C_buffer);
+    clSetKernelArg(kernel, 0, sizeof(A1_buffer), &A1_buffer);
+    clSetKernelArg(kernel, 1, sizeof(A2_buffer), &A2_buffer);
+    clSetKernelArg(kernel, 2, sizeof(B_buffer), &B_buffer);
+    clSetKernelArg(kernel, 3, sizeof(C1_buffer), &C1_buffer);
+    clSetKernelArg(kernel, 4, sizeof(C2_buffer), &C2_buffer);
 
     // clSetKernelArg(kernel, 2, sizeof(int), &size);
     // 分配局部内存
@@ -140,19 +143,23 @@ int main(int argc, char** argv) {
     // printf("\n");
 
     std::string filePath = "./testData_888/RA.txt";
-    std::vector<uint32_t> inA = parseOctalFile(filePath,datasize);
+    std::vector<uint32_t> inA1 = parseOctalFile(filePath,datasize);
+    std::vector<uint32_t> inA2 = parseOctalFile(filePath,datasize);
     filePath = "./testData_888/RB.txt";
     std::vector<uint32_t> inB = parseOctalFile(filePath,datasize);
     filePath = "./testData_888/RC.txt";
-    std::vector<uint32_t> inC = parseOctalFile(filePath,datasize); 
-    for (const auto& value : inC) {
+    std::vector<uint32_t> inC1 = parseOctalFile(filePath,datasize); 
+    std::vector<uint32_t> inC2 = parseOctalFile(filePath,datasize); 
+    for (const auto& value : inC1) {
         std::cout << std::hex << value << " ";
     }
 
     // 将输入数据拷贝到设备端
-    CL_CHECK(clEnqueueWriteBuffer(queue, A_buffer, CL_TRUE, 0, nbytes, inA.data(), 0, NULL, NULL));
+    CL_CHECK(clEnqueueWriteBuffer(queue, A1_buffer, CL_TRUE, 0, nbytes, inA1.data(), 0, NULL, NULL));
+    CL_CHECK(clEnqueueWriteBuffer(queue, A2_buffer, CL_TRUE, 0, nbytes, inA2.data(), 0, NULL, NULL));
     CL_CHECK(clEnqueueWriteBuffer(queue, B_buffer, CL_TRUE, 0, nbytes, inB.data(), 0, NULL, NULL));
-    CL_CHECK(clEnqueueWriteBuffer(queue, C_buffer, CL_TRUE, 0, nbytes, inC.data(), 0, NULL, NULL));
+    CL_CHECK(clEnqueueWriteBuffer(queue, C1_buffer, CL_TRUE, 0, nbytes, inC1.data(), 0, NULL, NULL));
+    CL_CHECK(clEnqueueWriteBuffer(queue, C2_buffer, CL_TRUE, 0, nbytes, inC2.data(), 0, NULL, NULL));
 
 
     // 设置工作项和工作组的大小
@@ -164,8 +171,10 @@ int main(int argc, char** argv) {
     CL_CHECK(clFinish(queue));
 
     // 读取输出数据
-    std::vector<float> output(datasize);
-    CL_CHECK(clEnqueueReadBuffer(queue, C_buffer, CL_TRUE, 0, nbytes, output.data(), 0, NULL, NULL));
+    std::vector<uint32_t> output(datasize);
+    std::vector<uint32_t> output1(datasize);
+    CL_CHECK(clEnqueueReadBuffer(queue, C1_buffer, CL_TRUE, 0, nbytes, output.data(), 0, NULL, NULL));
+    CL_CHECK(clEnqueueReadBuffer(queue, C2_buffer, CL_TRUE, 0, nbytes, output1.data(), 0, NULL, NULL));
 
     // 验证结果
     // for (int i = 0; i < datasize; ++i) {
@@ -176,9 +185,11 @@ int main(int argc, char** argv) {
     // printf("finished kernel and success if no error!\n");
 
     // 清理资源
-    clReleaseMemObject(A_buffer);
+    clReleaseMemObject(A1_buffer);
+    clReleaseMemObject(A2_buffer);
     clReleaseMemObject(B_buffer);
-    clReleaseMemObject(C_buffer);
+    clReleaseMemObject(C1_buffer);
+    clReleaseMemObject(C2_buffer);
     clReleaseKernel(kernel);
     clReleaseProgram(program);
     clReleaseCommandQueue(queue);
