@@ -8,11 +8,11 @@ __kernel void Convolution(__global uint *a1,__global uint *a2, __global uint *b,
   barrier(CLK_LOCAL_MEM_FENCE | CLK_GLOBAL_MEM_FENCE);
   // tc.mma,shape=888,dtype=fp16 no ReLU
   __asm__ __volatile__(".insn r 0x61, 0x4, 0x0, %0, %1, %2"
-                       : "=vr"(C1i)
+                       : "+vr"(C1i)
                        : "vr"(A1i), "vr"(Bi));
   // tc.mma,shape=888,dtype=fp16 no ReLU
   __asm__ __volatile__(".insn r 0x61, 0x4, 0x0, %0, %1, %2"
-                       : "=vr"(C2i)
+                       : "+vr"(C2i)
                        : "vr"(A2i), "vr"(Bi));                       
   barrier(CLK_LOCAL_MEM_FENCE | CLK_GLOBAL_MEM_FENCE);       
   c1[tid] = C1i;//+A1i+Bi;
