@@ -12,7 +12,7 @@ __kernel void Convolution(__global uint *a1,__global uint *a2, __global uint *b,
                        : "vr"(A1i), "vr"(Bi));
 // tc.mma,shape=848,dtype=mixed precision no ReLU
   __asm__ __volatile__(".insn r 0x61, 0x5, 0x2, %0, %1, %2"
-                       : "+vr"(c1[tid+1])
+                       : "+vr"(c1[tid+32])
                        : "vr"(a1[tid+1]), "vr"(Bi));
 // tc.mma,shape=848,dtype=mixed precision no ReLU
   __asm__ __volatile__(".insn r 0x61, 0x5, 0x2, %0, %1, %2"
@@ -20,7 +20,7 @@ __kernel void Convolution(__global uint *a1,__global uint *a2, __global uint *b,
                        : "vr"(A2i), "vr"(Bi));
 // tc.mma,shape=848,dtype=mixed precision no ReLU
   __asm__ __volatile__(".insn r 0x61, 0x5, 0x2, %0, %1, %2"
-                       : "+vr"(c2[tid+1])
+                       : "+vr"(c2[tid+32])
                        : "vr"(a2[tid+1]), "vr"(Bi));   
 
 // // tc.mma,shape=848,dtype=mixed precision + ReLU

@@ -12,7 +12,7 @@ __kernel void RNN(__global uint *a1,__global uint *a2, __global uint *b, __globa
                        : "vr"(A1i), "vr"(Bi));
 // tc.mma,shape=848,dtype=mixed precision no ReLU
   __asm__ __volatile__(".insn r 0x61, 0x5, 0x2, %0, %1, %2"
-                       : "+vr"(c1[tid+1])
+                       : "+vr"(c1[tid+32])
                        : "vr"(a1[tid+1]), "vr"(Bi));
 // tc.mma,shape=848,dtype=mixed precision no ReLU
   __asm__ __volatile__(".insn r 0x61, 0x5, 0x2, %0, %1, %2"
@@ -20,7 +20,7 @@ __kernel void RNN(__global uint *a1,__global uint *a2, __global uint *b, __globa
                        : "vr"(A2i), "vr"(Bi));
 // tc.mma,shape=848,dtype=mixed precision no ReLU
   __asm__ __volatile__(".insn r 0x61, 0x5, 0x2, %0, %1, %2"
-                       : "+vr"(c1[tid+1])
+                       : "+vr"(c1[tid+32])
                        : "vr"(a2[tid+1]), "vr"(Bi));   
 
   A1i = a1[tid+32];
@@ -29,19 +29,19 @@ __kernel void RNN(__global uint *a1,__global uint *a2, __global uint *b, __globa
   barrier(CLK_LOCAL_MEM_FENCE | CLK_GLOBAL_MEM_FENCE);
 // tc.mma,shape=848,dtype=mixed precision + ReLU
   __asm__ __volatile__(".insn r 0x61, 0x5, 0x6, %0, %1, %2"
-                       : "+vr"(c1[tid+32])
+                       : "+vr"(c1[tid+64])
                        : "vr"(a1[tid+32]), "vr"(Bi));
 // tc.mma,shape=848,dtype=mixed precision + ReLU
   __asm__ __volatile__(".insn r 0x61, 0x5, 0x6, %0, %1, %2"
-                       : "+vr"(c1[tid+33])
+                       : "+vr"(c1[tid+64+32])
                        : "vr"(a1[tid+33]), "vr"(Bi));
 // tc.mma,shape=848,dtype=mixed precision + ReLU
   __asm__ __volatile__(".insn r 0x61, 0x5, 0x6, %0, %1, %2"
-                       : "+vr"(c2[tid+32])
+                       : "+vr"(c2[tid+64])
                        : "vr"(a2[tid+32]), "vr"(Bi));
 // tc.mma,shape=848,dtype=mixed precision + ReLU
   __asm__ __volatile__(".insn r 0x61, 0x5, 0x6, %0, %1, %2"
-                       : "+vr"(c2[tid+33])
+                       : "+vr"(c2[tid+64+32])
                        : "vr"(a2[tid+33]), "vr"(Bi));    
 
   // // tc.mma,shape=888,dtype=fp16 ReLU
