@@ -1,49 +1,38 @@
-# This is a sample Python script.
+import struct
+import os
 
-# Press Shift+F10 to execute it or replace it with your code.
-# Press Double Shift to search everywhere for classes, files, tool windows, actions, and settings.
+import numpy as np
 
-
-def print_hi(name: str):
-    # Use a breakpoint in the code line below to debug your script.
-    print(f'Hi, {name}')  # Press Ctrl+F8 to toggle the breakpoint.
+dec_float = 5.9
 
 
-class Solution:
-    def quickSort(self, nums: List[int], l:int, r:int):
-        if l<r:
-            mid = self.partition(nums, l, r)
-            self.quickSort(nums, l, mid-1)
-            self.quickSort(nums, mid+1, r)
-
-    def partition(self, nums:List[int], l:int, r:int) ->int:
-        m = nums[l]
-        i = l
-        j = l+1
-        while j <= r:
-            if nums[j] < m:
-                i += 1
-                self.swap(nums,i,j)
-            j += 1
-        self.swap(nums,l,i)
-        return l
-
-    def swap(self,nums,i,j):
-        temp = nums[i]
-        nums[i] = nums[j]
-        nums[j] = temp
+def getFP16Str(dec_float=5.9):
+    # # 十进制单精度浮点转16位16进制
+    hexa = struct.unpack('H', struct.pack('e', dec_float))[0]
+    # print()
+    hexa = hex(hexa)
+    hexa = hexa[2:]
+    # print(hexa) # 45e6
+    # print(dec_float.tobytes())
+    return hexa  # str(dec_float.tobytes())#hexa
 
 
-    def sortArray(self, nums: List[int]) -> List[int]:
-        if len(nums) <2:
-            return nums
-        self.quickSort(nums,0,len(nums)-1)
-        return nums
+def Hex2FP16(hexa: str):
+    y = struct.pack("H", int(hexa, 16))
+    float = np.frombuffer(y, dtype=np.float16)[0]
+    print(float)  # 5.9
+    return float
 
-# Press the green button in the gutter to run the script.
-if __name__ == '__main__':
-    print_hi('PyCharm')
+def Hex2FP32(hexa: str):
+    y = struct.pack("H", int(hexa, 32))
+    float = np.frombuffer(y, dtype=np.float32)[0]
+    print(float)  # 5.9
+    return float
 
-# See PyCharm help at https://www.jetbrains.com/help/pycharm/
 
+print(Hex2FP16('00f0'))
+print(Hex2FP16('b49a'))
+# FP16 0108 1.574e-05
+# FP32 37840000 0.000015735626220703125
 
+# print(Hex2FP32('37700000'))
