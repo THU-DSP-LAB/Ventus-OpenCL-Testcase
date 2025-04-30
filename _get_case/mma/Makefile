@@ -1,28 +1,24 @@
-# include ../../common/make.config
-OPENCL_DIR = ${VENTUS_INSTALL_PREFIX}/../../ocl-icd
-OPENCL_INC = ${VENTUS_INSTALL_PREFIX}/include
-OPENCL_LIB = ${VENTUS_INSTALL_PREFIX}/lib
-POCUS_INCLUDE_DIR = /home/liuwei/pocl/poclu
+# PROJECT = saxpy
 
-#Can be changed by `make TYPE=CPU`
+# SRCS = main.cc
+
+# OPTS ?= -n1024
+
+# include ../common.mk
+
+include ../common/make.config
 TYPE = GPU
-
-#C compiler
 CC = clang++
-
-SRC = mma.c mma_exec.c
-
-CC_FLAGS = -g -O3
-
+CC_FLAGS = -g -O2 -std=c++11
+CC_FLAGS += -I.
 EXE = mma.out
 
-KERNEL_DIM="-DRD_WG_SIZE_0=32"
+.PHONY: $(EXE)
+mma.out: 
+	$(CC) $(CC_FLAGS) main.cc -o $(EXE) -I$(OPENCL_INC) -L$(OPENCL_LIB) -lOpenCL -Wno-unused-result
 
-release:
-	$(CC) $(KERNEL_DIM) $(CC_FLAGS) $(SRC) -o $(EXE) -I$(OPENCL_INC) -I$(POCUS_INCLUDE_DIR) -L$(OPENCL_LIB) -lOpenCL -I../util -DTIMING -Wno-unused-result
+%.o: %.[ch]
+	$(CC) $(CC_FLAGS) $< -c
 
-run:$(EXE)
-	./mma.out
-
-clean: 
-	rm -f $(EXE)  
+clean:
+	rm -f *.o *~ *.out *.linkinfo
