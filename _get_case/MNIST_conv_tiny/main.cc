@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <math.h>
 
 /* ── 网络超参 ───────────────────────── */
 #define IN1_CHANNELS 1
