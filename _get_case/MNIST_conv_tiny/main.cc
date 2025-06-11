@@ -7,32 +7,34 @@
 #include <math.h>
 
 /* ── 网络超参 ───────────────────────── */
+// 更新后的网络参数宏（与 PyTorch 网络保持一致）
 #define IN1_CHANNELS 1
 #define IN1_H 28
 #define IN1_W 28
-#define CONV1_OUT_CHANNELS 2
+
+#define CONV1_OUT_CHANNELS 1
 #define CONV1_K 5
-#define CONV1_STRIDE 1
-#define CONV1_OUT_H (IN1_H - CONV1_K + 1)   /* 24 */
-#define CONV1_OUT_W (IN1_W - CONV1_K + 1)   /* 24 */
+#define CONV1_STRIDE 5
+#define CONV1_OUT_H ((IN1_H - CONV1_K) / CONV1_STRIDE + 1) // 5
+#define CONV1_OUT_W ((IN1_W - CONV1_K) / CONV1_STRIDE + 1) // 5
 
 #define CONV2_OUT_CHANNELS 1
-#define CONV2_K 5
-#define CONV2_STRIDE 5
-#define CONV2_IN_CHANNELS  CONV1_OUT_CHANNELS
-#define CONV2_IN_H         CONV1_OUT_H
-#define CONV2_IN_W         CONV1_OUT_W
-#define CONV2_OUT_H ((CONV2_IN_H - CONV2_K) / CONV2_STRIDE + 1) /* 4 */
-#define CONV2_OUT_W ((CONV2_IN_W - CONV2_K) / CONV2_STRIDE + 1) /* 4 */
+#define CONV2_K 2
+#define CONV2_STRIDE 1
+#define CONV2_IN_CHANNELS CONV1_OUT_CHANNELS
+#define CONV2_IN_H CONV1_OUT_H
+#define CONV2_IN_W CONV1_OUT_W
+#define CONV2_OUT_H ((CONV2_IN_H - CONV2_K) / CONV2_STRIDE + 1) // 4
+#define CONV2_OUT_W ((CONV2_IN_W - CONV2_K) / CONV2_STRIDE + 1) // 4
 
 #define CONV3_OUT_CHANNELS 10
 #define CONV3_K 4
 #define CONV3_STRIDE 1
-#define CONV3_IN_CHANNELS  CONV2_OUT_CHANNELS
-#define CONV3_IN_H         CONV2_OUT_H
-#define CONV3_IN_W         CONV2_OUT_W
-#define CONV3_OUT_H 1
-#define CONV3_OUT_W 1
+#define CONV3_IN_CHANNELS CONV2_OUT_CHANNELS
+#define CONV3_IN_H CONV2_OUT_H
+#define CONV3_IN_W CONV2_OUT_W
+#define CONV3_OUT_H ((CONV3_IN_H - CONV3_K) / CONV3_STRIDE + 1) // 1
+#define CONV3_OUT_W ((CONV3_IN_W - CONV3_K) / CONV3_STRIDE + 1) // 1
 
 /* ── 工具函数 ───────────────────────── */
 static float hex_to_float(const char *hexstr){

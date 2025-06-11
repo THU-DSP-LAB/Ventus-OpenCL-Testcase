@@ -28,16 +28,15 @@ def save_array_as_hex(filename: str, array):
 class ConvNN(nn.Module):
     def __init__(self):
         super().__init__()
-        self.conv1 = nn.Conv2d(1, 2, kernel_size=5)             # [B,2,24,24]
-        self.conv2 = nn.Conv2d(2, 1, kernel_size=5, stride=5)   # [B,1,4,4]
-        self.conv3 = nn.Conv2d(1, 10, kernel_size=4)            # [B,10,1,1]
+        self.conv1 = nn.Conv2d(1, 1, kernel_size=5, stride=5)  # [B,1,5,5]
+        self.conv2 = nn.Conv2d(1, 1, kernel_size=2)            # [B,1,4,4]
+        self.conv3 = nn.Conv2d(1, 10, kernel_size=4)           # [B,10,1,1]
 
     def forward(self, x):
-        x = torch.relu(self.conv1(x))
-        x = torch.relu(self.conv2(x))
-        x = self.conv3(x)
-        return x.view(x.size(0), -1)     # -> [B,10]
-
+        x = torch.relu(self.conv1(x))     # [B,1,5,5]
+        x = torch.relu(self.conv2(x))     # [B,1,4,4]
+        x = self.conv3(x)                 # [B,10,1,1]
+        return x.view(x.size(0), -1)      # -> [B,10]
 
 # ──────────────────────────────
 # 训练
@@ -90,7 +89,7 @@ def evaluate_model(model: nn.Module):
 # 主流程
 # ──────────────────────────────
 def main():
-    model = train_model(num_epochs=3).eval()
+    model = train_model(num_epochs=10).eval()
     evaluate_model(model)
 
     # 保存权重/偏置
