@@ -192,7 +192,7 @@ int main(void){
     size_t blocks1=g1[0]*g1[1]*g1[2];
     size_t blocks2=g2[0]*g2[1]*g2[2];
     size_t blocks3=g3[0]*g3[1]*g3[2];
-    printf("\n各层使用 block 数 (global work-item)：\n");
+    printf("\n各层使用 thread 数 (global work-item)：\n");
     printf("conv1 : %zu\nconv2 : %zu\nconv3 : %zu\n"
            "总计  : %zu\n",
            blocks1,blocks2,blocks3,
