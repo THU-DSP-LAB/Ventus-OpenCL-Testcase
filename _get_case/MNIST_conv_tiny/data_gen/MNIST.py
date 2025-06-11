@@ -6,125 +6,122 @@ import struct
 import numpy as np
 
 
-# 将 float 转换为 32 位浮点数的 16 进制字符串（带 h 前缀）
-def float_to_hex(f):
-    # 使用网络字节序（大端）保证格式一致
+# ──────────────────────────────
+# 工具函数
+# ──────────────────────────────
+def float_to_hex(f: float) -> str:
+    """单个 float → 'hXXXXXXXX' 大端 16 进制字符串"""
     return "h{:08x}".format(struct.unpack("!I", struct.pack("!f", f))[0])
 
 
-# 将 numpy 数组（或任意可转换为一维数组的对象）以空格分隔的 hex 格式保存到文件中
-def save_array_as_hex(filename, array):
-    # 若 array 为多维数组，则先展平成一维
+def save_array_as_hex(filename: str, array):
+    """numpy / tensor 展平成 1-D → 空格分隔 hex 字符串写文件"""
     flat = np.array(array).flatten()
-    hex_strs = [float_to_hex(x) for x in flat]
     with open(filename, "w") as f:
-        f.write(" ".join(hex_strs))
-    print(f"Saved {filename} with {len(flat)} numbers.")
+        f.write(" ".join(float_to_hex(x) for x in flat))
+    print(f"Saved {filename} ({len(flat)} numbers)")
 
 
-# 定义全卷积神经网络：
-# 输入 [batch, 1, 28, 28]
-# conv1: 1->16, kernel_size=5, 输出 [batch, 16, 24, 24]
-# conv2: 16->32, kernel_size=5, 输出 [batch, 32, 20, 20]
-# conv3: 32->10, kernel_size=20, 输出 [batch, 10, 1, 1]，展平后即为 10 维输出
+# ──────────────────────────────
+# 网络定义
+# ──────────────────────────────
 class ConvNN(nn.Module):
     def __init__(self):
-        super(ConvNN, self).__init__()
-        self.conv1 = nn.Conv2d(1, 2, kernel_size=5)             # [batch, 2, 24, 24]
-        self.conv2 = nn.Conv2d(2, 1, kernel_size=5, stride=5)   # [batch, 1, 4, 4]
-        self.conv3 = nn.Conv2d(1, 10, kernel_size=4)            # [batch, 10, 1, 1]
+        super().__init__()
+        self.conv1 = nn.Conv2d(1, 2, kernel_size=5)             # [B,2,24,24]
+        self.conv2 = nn.Conv2d(2, 1, kernel_size=5, stride=5)   # [B,1,4,4]
+        self.conv3 = nn.Conv2d(1, 10, kernel_size=4)            # [B,10,1,1]
 
     def forward(self, x):
-        x = self.conv1(x)           # [batch, 2, 24, 24]
-        x = torch.relu(x)
-        x = self.conv2(x)           # [batch, 1, 4, 4]
-        x = torch.relu(x)
-        x = self.conv3(x)           # [batch, 10, 1, 1]
-        x = x.view(x.size(0), -1)   # [batch, 10]
-        return x
+        x = torch.relu(self.conv1(x))
+        x = torch.relu(self.conv2(x))
+        x = self.conv3(x)
+        return x.view(x.size(0), -1)     # -> [B,10]
 
 
-def train_model():
-    # 使用 torchvision 下载 MNIST 数据
+# ──────────────────────────────
+# 训练
+# ──────────────────────────────
+def train_model(num_epochs: int = 3) -> ConvNN:
     transform = transforms.Compose([transforms.ToTensor()])
-    train_dataset = datasets.MNIST(root='D:\_class_Data\Python\Ventus-OpenCL-Testcase\data', train=True, download=True, transform=transform)
-    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=64, shuffle=True)
+    train_dataset = datasets.MNIST(
+        root="D:/_class_Data/Python/Ventus-OpenCL-Testcase/data",
+        train=True, download=True, transform=transform)
+    train_loader = torch.utils.data.DataLoader(train_dataset,
+                                               batch_size=64, shuffle=True)
 
     model = ConvNN()
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.SGD(model.parameters(), lr=0.01)
 
     model.train()
-    num_epochs = 3  # 为演示仅训练1个 epoch，实际可增加训练轮数
     for epoch in range(num_epochs):
         for batch_idx, (data, target) in enumerate(train_loader):
             optimizer.zero_grad()
-            output = model(data)
-            loss = criterion(output, target)
+            loss = criterion(model(data), target)
             loss.backward()
             optimizer.step()
             if batch_idx % 100 == 0:
-                print(f"Epoch {epoch} [{batch_idx * len(data)}/{len(train_loader.dataset)}] Loss: {loss.item():.6f}")
+                done = batch_idx * len(data)
+                print(f"Epoch {epoch} [{done}/{len(train_loader.dataset)}] "
+                      f"Loss: {loss.item():.6f}")
     return model
 
 
+# ──────────────────────────────
+# 评估
+# ──────────────────────────────
+@torch.no_grad()
+def evaluate_model(model: nn.Module):
+    test_loader = torch.utils.data.DataLoader(
+        datasets.MNIST(root="./data", train=False, download=True,
+                       transform=transforms.ToTensor()),
+        batch_size=100, shuffle=False)
+
+    correct = sum((model(data).argmax(1) == target).sum().item()
+                  for data, target in test_loader)
+    total = len(test_loader.dataset)
+    acc = 100.0 * correct / total
+    print(f"模型在测试集上的准确率: {acc:.2f}%")
+    return acc
+
+
+# ──────────────────────────────
+# 主流程
+# ──────────────────────────────
 def main():
-    # 训练模型
-    model = train_model()
-    model.eval()
+    model = train_model(num_epochs=3).eval()
     evaluate_model(model)
 
-    # 取出各层权重和偏置，Conv2d 层的 weight shape 为 [out_channels, in_channels, kernel_height, kernel_width]
-    conv1_weight = model.conv1.weight.detach().cpu().numpy()  # shape: (16, 1, 5, 5)
-    conv1_bias   = model.conv1.bias.detach().cpu().numpy()    # shape: (16,)
-    conv2_weight = model.conv2.weight.detach().cpu().numpy()  # shape: (32, 16, 5, 5)
-    conv2_bias   = model.conv2.bias.detach().cpu().numpy()    # shape: (32,)
-    conv3_weight = model.conv3.weight.detach().cpu().numpy()  # shape: (10, 32, 20, 20)
-    conv3_bias   = model.conv3.bias.detach().cpu().numpy()    # shape: (10,)
+    # 保存权重/偏置
+    save_array_as_hex("conv1_weight.txt", model.conv1.weight.cpu().detach())
+    save_array_as_hex("conv1_bias.txt",   model.conv1.bias.cpu().detach())
+    save_array_as_hex("conv2_weight.txt", model.conv2.weight.cpu().detach())
+    save_array_as_hex("conv2_bias.txt",   model.conv2.bias.cpu().detach())
+    save_array_as_hex("conv3_weight.txt", model.conv3.weight.cpu().detach())
+    save_array_as_hex("conv3_bias.txt",   model.conv3.bias.cpu().detach())
 
-    # 保存权重和偏置到文本文件
-    save_array_as_hex("conv1_weight.txt", conv1_weight)
-    save_array_as_hex("conv1_bias.txt", conv1_bias)
-    save_array_as_hex("conv2_weight.txt", conv2_weight)
-    save_array_as_hex("conv2_bias.txt", conv2_bias)
-    save_array_as_hex("conv3_weight.txt", conv3_weight)
-    save_array_as_hex("conv3_bias.txt", conv3_bias)
-
-    # 从 MNIST 测试集取一组测试数据，并计算模型输出
-    test_dataset = datasets.MNIST(root='./data', train=False, download=True, transform=transforms.ToTensor())
-    test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=1, shuffle=False)
-    test_input, test_target = next(iter(test_loader))  # 取第一个样本
-    with torch.no_grad():
-        test_output = model(test_input)
-
-    # 保存测试输入和对应输出
-    # 由于模型的输入依然为 [1, 1, 28, 28]，可展平成 784 个数；输出为 10 维
-    test_input_np = test_input.view(-1).detach().cpu().numpy()
-    test_output_np = test_output.view(-1).detach().cpu().numpy()
-
-    save_array_as_hex("test_input.txt", test_input_np)
-    save_array_as_hex("test_output.txt", test_output_np)
-
-    print("所有数据已保存，可供后续 OpenCL host 代码使用。")
-
-def evaluate_model(model):
-    test_dataset = datasets.MNIST(root='./data', train=False, download=True, transform=transforms.ToTensor())
-    test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=100, shuffle=False)
-
-    model.eval()
-    correct = 0
-    total = 0
+    # ---- 取 1 个测试样本并逐层推理 ----
+    test_dataset = datasets.MNIST(root="./data", train=False, download=True,
+                                  transform=transforms.ToTensor())
+    test_input, _ = test_dataset[0]               # [1,28,28]
+    test_input = test_input.unsqueeze(0)          # -> [1,1,28,28]
 
     with torch.no_grad():
-        for data, target in test_loader:
-            output = model(data)
-            pred = output.argmax(dim=1)  # 预测的类别
-            correct += (pred == target).sum().item()
-            total += target.size(0)
+        out1 = torch.relu(model.conv1(test_input))    # [1,2,24,24]
+        out2 = torch.relu(model.conv2(out1))          # [1,1,4,4]
+        out3 = model.conv3(out2)                      # [1,10,1,1]
+        final_out = out3.view(-1)                     # [10]
 
-    accuracy = 100.0 * correct / total
-    print(f"模型在测试集上的准确率: {accuracy:.2f}%")
-    return accuracy
+    # ---- 保存输入 & 每层输出 ----
+    save_array_as_hex("test_input.txt",  test_input.cpu())
+    save_array_as_hex("conv1_out.txt",   out1.cpu())
+    save_array_as_hex("conv2_out.txt",   out2.cpu())
+    save_array_as_hex("conv3_out.txt",   out3.cpu())       # 原尺寸 10×1×1
+    save_array_as_hex("test_output.txt", final_out.cpu())  # 展平 10
+
+    print("全部权重、偏置、输入以及各层输出已保存完成。")
+
 
 if __name__ == "__main__":
     main()
