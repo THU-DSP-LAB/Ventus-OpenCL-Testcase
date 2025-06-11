@@ -21,7 +21,27 @@ def getFP16Str(dec_float=5.9):
     print(hexa)  # 45e6
     return hexa#str(dec_float.tobytes())#hexa
 
-Hex2FP16('c000')
+# Hex2FP16('3c00')
+# Hex2FP16('4000')
+# Hex2FP16('4700')
+Hex2FP16('3be4')
+Hex2FP16('2fd0')
+
+getFP16Str(0.03)
+getFP16Str(0.04)
+getFP16Str(0.03*0.04)
+print("here: ")
+getFP16Str(2.5)
+Hex2FP16('1400')
+Hex2FP16('14ea')
+print("here2: ")
+Hex2FP16('c2fd')
+Hex2FP16('2f23')
+
 for i in range(6):
     print(i, end=' ')
     getFP16Str(i)
+
+Hex2FP16('e334')
+Hex2FP16("f1f8")
+Hex2FP16("08c4")
