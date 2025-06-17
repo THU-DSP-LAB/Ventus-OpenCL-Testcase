@@ -1,5 +1,5 @@
 .vscode/
-*.data
-*.metadata
+# *.data
+# *.metadata
 *.riscv
 *.vmem
