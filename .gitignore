@@ -3,3 +3,5 @@
 # *.metadata
 *.riscv
 *.vmem
+*.log
+*.vcd
