@@ -1,6 +1,6 @@
-# PROJECT = AlexNet
+# PROJECT = LeNet5
 
-# SRCS = AlexNet_main.cc
+# SRCS = LeNet5_main.cc
 
 # OPTS ?= -n1024
 
@@ -9,11 +9,11 @@ TYPE = GPU
 CC = clang++
 CC_FLAGS = -g -O2 -std=c++11
 CC_FLAGS += -I.
-EXE = AlexNet.out
+EXE = LeNet5.out
 
 .PHONY: $(EXE)
-AlexNet.out: 
-	$(CC) $(CC_FLAGS) AlexNet_main.cc -o $(EXE) -I$(OPENCL_INC) -L$(OPENCL_LIB) -lOpenCL -Wno-unused-result
+LeNet5.out: 
+	$(CC) $(CC_FLAGS) LeNet5_main.cc -o $(EXE) -I$(OPENCL_INC) -L$(OPENCL_LIB) -lOpenCL -Wno-unused-result
 
 %.o: %.[ch]
 	$(CC) $(CC_FLAGS) $< -c
