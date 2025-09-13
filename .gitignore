@@ -8,3 +8,6 @@
 *.data
 *.metadata
 *.out
+object*.cl
+object*.dump
+.idea/*
