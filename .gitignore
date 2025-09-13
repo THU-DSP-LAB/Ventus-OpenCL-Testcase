@@ -5,3 +5,6 @@
 *.vmem
 *.log
 *.vcd
+*.data
+*.metadata
+*.out
