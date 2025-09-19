@@ -1,6 +1,3 @@
-// pool2d.cl — 2D Pooling (Max / Avg), NCHW, N=1
-// mode: 0=max, 1=avg
-// count_include_pad: 对 avg 是否把越界 padding 区域计入分母 (0/1)
 __kernel void pool2d(
     __global const float* x,    // [C,IH,IW]
     __global float*       y,    // [C,OH,OW]
