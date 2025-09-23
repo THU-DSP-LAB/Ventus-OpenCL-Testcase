@@ -63,6 +63,8 @@ getbin:
 	nvcc -arch=sm_89 -cubin kernel.ptx -o kernel_sm89.cubin
 
 compile:
+	export PATH=/usr/local/cuda/bin:$$PATH
+	export LD_LIBRARY_PATH=/usr/local/cuda/lib64:$$LD_LIBRARY_PATH
 	nvcc -O2 -std=c++17 loader.cpp -o loader -lcuda
 profile:compile
 	ncu --target-processes all \
