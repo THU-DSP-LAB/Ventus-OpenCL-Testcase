@@ -3,6 +3,13 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <cmath>
+
+template <typename T>
+bool close_enough(T val, T b, double atol=1e-4, double rtol=1e-4) {
+    T diff = std::fabs(val - b);
+    return (diff < atol) || (diff < (rtol * std::fabs(b)));
+}
 
 // 网络各层尺寸配置
 // 第一层：conv1: 输入 [1,28,28] → 输出 [16,24,24]，卷积核大小 5x5，激活：ReLU
@@ -353,11 +360,13 @@ int main() {
     printf("-------------------------------------------------\n");
     printf("索引\tOpenCL推理结果\t实际结果\t误差(%%)\tOpenCL结果(十六进制)\n");
     printf("-------------------------------------------------\n");
+    int bad = 0;
     for (int i = 0; i < CONV3_OUT_CHANNELS; i++) {
         char hex_buf[11]; // "h" + 8位数字 + '\0'
         float_to_hex_string(output[i], hex_buf);
         double err = (output[i] - actual_output[i]) / actual_output[i];
         printf("%d\t%f\t%f\t%.1f%\t%s\n", i, output[i], actual_output[i], err * 100.0, hex_buf);
+        bad += !close_enough(output[i], actual_output[i]);
     }
     printf("-------------------------------------------------\n");
 
@@ -386,5 +395,10 @@ int main() {
     free(test_input);
     free(actual_output);
 
-    return 0;
+    if (bad == 0) {
+        printf("\nAll results match, \033[92m✔\033[0m\n");
+    } else {
+        printf("\nSome results do not match, \033[91m✘\033[0m\n");
+    }
+    return bad != 0; // 返回0表示成功，1表示有不匹配
 }

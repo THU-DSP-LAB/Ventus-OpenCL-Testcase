@@ -58,7 +58,7 @@ static char* load_kernel_source(const char*file){
     return src;
 }
 /* 打印并统计误差 */
-static void compare_and_report(const char*tag,const float*cl,const float*ref,int n){
+static int compare_and_report(const char*tag,const float*cl,const float*ref,int n){
     int bad=0;
     printf("\n--- %s (%d elements) ---\n",tag,n);
     printf("idx\tOpenCL\t\tPython\t\tΔ%%\tHex(OpenCL)\n");
@@ -73,6 +73,7 @@ static void compare_and_report(const char*tag,const float*cl,const float*ref,int
     }
     if(n>preview) puts("...(省略)");
     printf("不符合阈值元素: %d / %d (%.2f%%)\n",bad,n,100.0*bad/n);
+    return bad;
 }
 /* ── main ──────────────────────────── */
 int main(void){
@@ -184,9 +185,10 @@ int main(void){
     float *ref2=load_array_from_hex("data_gen/conv2_out.txt",&n2);
     float *ref3=load_array_from_hex("data_gen/conv3_out.txt",&n3);
 
-    compare_and_report("CONV1",out1,ref1,n1);
-    compare_and_report("CONV2",out2,ref2,n2);
-    compare_and_report("CONV3",out3,ref3,n3);
+    int bad = 0;
+    bad += compare_and_report("CONV1",out1,ref1,n1);
+    bad += compare_and_report("CONV2",out2,ref2,n2);
+    bad += compare_and_report("CONV3",out3,ref3,n3);
 
 /* 9) block 数量 */
     size_t blocks1=g1[0]*g1[1]*g1[2];
@@ -206,5 +208,11 @@ int main(void){
 
     free(w1);free(b1);free(w2);free(b2);free(w3);free(b3);free(in);
     free(ref1);free(ref2);free(ref3);
-    return 0;
+
+    if (bad == 0) {
+        printf("\nAll results match, \033[92m✔\033[0m\n");
+    } else {
+        printf("\nSome results do not match, \033[91m✘\033[0m\n");
+    }
+    return bad != 0; // 返回0表示成功，1表示有不匹配
 }

@@ -1,4 +1,5 @@
 #include <CL/cl.h>
+#include <cmath>
 #include <iostream>
 #include <fstream>
 #include <sstream>
@@ -6,6 +7,12 @@
 #include <cstdlib>
 #include <cstring>   // for memcpy
 #include <cstdint>   // for uint32_t
+
+template <typename T>
+bool close_enough(T val, T b, double atol=1e-4, double rtol=1e-4) {
+    T diff = std::fabs(val - b);
+    return (diff < atol) || (diff < (rtol * std::fabs(b)));
+}
 
 // 检查 OpenCL 调用错误的宏
 #define CL_CHECK(err) if(err != CL_SUCCESS){ std::cerr << "OpenCL Error: " << err << std::endl; exit(-1); }
@@ -214,10 +221,19 @@ int main() {
 
     // 输出前向计算结果及期望输出（来自 test_output.txt）
     std::cout << "Neural network forward output:" << std::endl;
+    bool all_match = true;
     for (int i = 0; i < OUTPUT_SIZE; ++i) {
         std::cout << "Output[" << i << "] = " << output[i]
                   << " (expected " << expected_output[i] << ")"
                   << " in hex: " << floatToHex(output[i]) << std::endl;
+        if (!close_enough(output[i], expected_output[i])) {
+            all_match = false;
+        }
+    }
+    if (all_match) {
+        std::cout << "All outputs match expected values, \033[92m✔\033[0m" << std::endl;
+    } else {
+        std::cout << "Some outputs do not match expected values, \033[91m✘\033[0m" << std::endl;
     }
 
     // 11. 释放所有 OpenCL 资源
@@ -233,5 +249,5 @@ int main() {
     clReleaseCommandQueue(queue);
     clReleaseContext(context);
 
-    return 0;
+    return !all_match; // 返回0表示成功，1表示有不匹配
 }
