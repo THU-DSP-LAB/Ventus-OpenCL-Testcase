@@ -9,7 +9,10 @@
 #include <cassert>
 #include <iostream>
 #include <random>   // 固定种子用
-
+#include <iostream>
+#include <fstream>
+#include <sstream>
+#include "../common/ventus_result_io.h"
 // ======= Kernel 路径（与现有工程一致）=======
 static const char* KPATH_CONV      = "../AIops/Conv/conv.cl";
 static const char* KPATH_RELU      = "../AIops/ReLU/relu.cl";
@@ -398,6 +401,7 @@ int main() {
     for (int i=0;i<NUM_CLASSES;++i){
         printf("%d %.6f\n", i, out[i]);
     }
+    ventus_write_final_hex(out);
 
     // 资源释放
     clReleaseMemObject(x0.buf);

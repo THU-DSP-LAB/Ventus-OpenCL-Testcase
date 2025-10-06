@@ -9,9 +9,9 @@
 #include <math.h>
 
 /* ── 可改的矩阵尺寸（C = A[MxK] * B[KxN]） ───────────────────────── */
-#define M 128/4
-#define N 128/4
-#define K 128/4
+#define M 128/4/8
+#define N 128/4/8
+#define K 128/4/8
 
 /* ── 单 work-group 内部的 tile 配置：global==local -> 只有 1 个 work-group ─ */
 #define TILE_M 1//16

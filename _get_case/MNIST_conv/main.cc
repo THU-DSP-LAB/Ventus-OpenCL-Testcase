@@ -3,7 +3,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
-
+#include <iostream>
+#include <fstream>
+#include <sstream>
+#include "../common/ventus_result_io.h"
 // 网络各层尺寸配置
 // 第一层：conv1: 输入 [1,28,28] → 输出 [16,24,24]，卷积核大小 5x5，激活：ReLU
 #define IN1_CHANNELS 1
@@ -348,6 +351,8 @@ int main() {
     if(actual_count != CONV3_OUT_CHANNELS) {
         printf("实际结果数量(%d)与预期(%d)不符！\n", actual_count, CONV3_OUT_CHANNELS);
     }
+
+    ventus_write_final_hex(output);
 
     // 9. 输出对比结果
     printf("-------------------------------------------------\n");

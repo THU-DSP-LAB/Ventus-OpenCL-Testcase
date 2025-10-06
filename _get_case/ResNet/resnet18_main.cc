@@ -8,7 +8,10 @@
 #include <string>
 #include <cassert>
 #include <random>
-
+#include <iostream>
+#include <fstream>
+#include <sstream>
+#include "../common/ventus_result_io.h"
 // ======= 路径（相对于本文件所在工作目录）=======
 static const char* KPATH_CONV      = "../AIops/Conv/conv.cl";
 static const char* KPATH_CONV_BN   = "../AIops/Conv_BN/conv_bn.cl";
@@ -509,6 +512,8 @@ int main(){
     puts("\nResNet18 logits (first 10, deterministic):");
     for (int i=0;i<10 && i<NUM_CLASSES;++i)
         printf("logit[%d] = %+9.6f\n", i, logits[i]);
+
+    ventus_write_final_hex(logits);
 
     // ===== 清理（安全释放）=====
     // 中间张量

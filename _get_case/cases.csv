@@ -1,0 +1,9 @@
+dir,exe,run_cmd
+MNIST,nn_forward.out,
+MNIST_conv,conv.out,
+MNIST_conv_tiny,conv.out,
+MNIST_conv_small,conv.out,
+LeNet5-simple,LeNet5-simple.out,
+LeNet5,LeNet5.out,
+AlexNet,AlexNet.out,
+ResNet,ResNet18.out,

@@ -7,6 +7,11 @@
 #include <cstring>   // for memcpy
 #include <cstdint>   // for uint32_t
 
+#include <iostream>
+#include <fstream>
+#include <sstream>
+#include "../common/ventus_result_io.h"
+
 // 检查 OpenCL 调用错误的宏
 #define CL_CHECK(err) if(err != CL_SUCCESS){ std::cerr << "OpenCL Error: " << err << std::endl; exit(-1); }
 
@@ -219,6 +224,8 @@ int main() {
                   << " (expected " << expected_output[i] << ")"
                   << " in hex: " << floatToHex(output[i]) << std::endl;
     }
+
+    ventus_write_final_hex(output);
 
     // 11. 释放所有 OpenCL 资源
     clReleaseMemObject(input_buf);

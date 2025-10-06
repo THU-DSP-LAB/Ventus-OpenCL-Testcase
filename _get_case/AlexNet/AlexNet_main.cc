@@ -8,7 +8,10 @@
 #include <cassert>
 #include <iostream>
 #include <random>   // 固定随机种子
-
+#include <iostream>
+#include <fstream>
+#include <sstream>
+#include "../common/ventus_result_io.h"
 // ======= 路径（相对于本文件所在工作目录）=======
 static const char* KPATH_CONV      = "../AIops/Conv/conv.cl";
 static const char* KPATH_CONV_BN   = "../AIops/Conv_BN/conv_bn.cl";
@@ -471,6 +474,7 @@ int main() {
     for (int i=0;i<NUM_CLASSES;++i){
         printf("%d %.6f\n", i, out[i]);
     }
+    ventus_write_final_hex(out);
 
     // 资源释放
     clReleaseMemObject(x0.buf);

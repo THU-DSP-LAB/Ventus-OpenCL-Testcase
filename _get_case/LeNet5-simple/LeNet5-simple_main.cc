@@ -9,7 +9,10 @@
 #include <cassert>
 #include <iostream>
 #include <random>
-
+#include <iostream>
+#include <fstream>
+#include <sstream>
+#include "../common/ventus_result_io.h"
 // ======= Kernel 路径（与现有工程一致）=======
 static const char* KPATH_CONV      = "../AIops/conv_fused/conv_fused.cl"; // 修改为卷积+ReLU融合的kernel路径
 static const char* KPATH_POOL2D    = "../AIops/Pool2D/pool2d.cl";
@@ -329,6 +332,7 @@ int main() {
     for (int i = 0; i < NUM_CLASSES; ++i) {
         printf("%d: %.6f\n", i, fc3_out.host[i]);
     }
+    ventus_write_final_hex(fc3_out.host);
 
     // 清理资源 (可选，但推荐)
     clReleaseMemObject(x0.buf); clReleaseMemObject(y1.buf); clReleaseMemObject(y2.buf);

@@ -5,7 +5,10 @@
 #include <string.h>
 #include <stdint.h>
 #include <math.h>
-
+#include <iostream>
+#include <fstream>
+#include <sstream>
+#include "../common/ventus_result_io.h"
 /* ── 网络超参 ───────────────────────── */
 #define IN1_CHANNELS 1
 #define IN1_H 28
@@ -187,6 +190,8 @@ int main(void){
     compare_and_report("CONV1",out1,ref1,n1);
     compare_and_report("CONV2",out2,ref2,n2);
     compare_and_report("CONV3",out3,ref3,n3);
+
+    ventus_write_final_hex(out3);
 
 /* 9) block 数量 */
     size_t blocks1=g1[0]*g1[1]*g1[2];
