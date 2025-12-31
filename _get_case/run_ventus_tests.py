@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import List, Tuple, Optional
 
 ROOT = Path(__file__).resolve().parent
-ENV_SH = "/home/liuwei/ventus/env.sh"
+ENV_SH = str(ROOT / "../../env.sh")
 RESULT_ENV = "VENTUS_RESULT_FILE"
 DEFAULT_RESULT_NAME = "result.hex"  # 程序若未设置环境变量时的默认文件名（不建议）
 
@@ -158,6 +158,7 @@ def main():
     ap.add_argument("--atol", type=float, default=1e-2)
     ap.add_argument("--jobs", type=int, default=0)
     ap.add_argument("--timeout", type=float, default=7200.0)
+    ap.add_argument("--ref", help="引用基准结果目录，跳过 NVIDIA 基线运行")
     ap.add_argument("--result_name", default="result.hex",
                     help="若程序未使用环境变量，默认写入的文件名（相对 case 目录），仅兜底")
     args = ap.parse_args()
@@ -208,33 +209,54 @@ def main():
         return p
 
     # 2) NVIDIA 基线
-    print("\n=== 阶段 2：NVIDIA 基线 ===")
-    for info in case_infos:
-        case, case_dir, run_cmd = info["case_name"], info["case_dir"], info["run_cmd"]
-        if not info["build_ok"]:
+    if args.ref:
+        print(f"\n=== 阶段 2：NVIDIA 基线 (使用 --ref={args.ref}) 中的预定义结果===")
+        ref_path = (ROOT / args.ref).resolve()
+        if ref_path.exists():
+            # 复制 ref_path 下所有内容到 results_dir
+            cmd = f"cp -r {shlex.quote(str(ref_path))}/* {shlex.quote(str(results_dir))}/"
+            print(f"Copying ref: {cmd}")
+            run_bash(cmd, cwd=ROOT)
+        else:
+            print(f"[WARN] Ref path {ref_path} not found!")
+
+        for info in case_infos:
+            case = info["case_name"]
+            out_file = result_path_for(case, "nvidia")
+            vals = parse_result_file(out_file) if out_file.exists() else []
             summary_rows.append({
-                "case": case, "env": "build", "status": "build_failed",
-                "time_s": f"{info['build_time']:.6f}", "match": "", "max_abs_err": "", "max_rel_err": "",
-                "details": "make failed"
+                "case": case, "env": "nvidia", "status": "skipped(ref)",
+                "time_s": "0.000000", "match": "baseline" if vals else "missing",
+                "max_abs_err": "", "max_rel_err": "", "details": f"from ref, {len(vals)} values"
             })
-            continue
+    else:
+        print("\n=== 阶段 2：NVIDIA 基线 ===")
+        for info in case_infos:
+            case, case_dir, run_cmd = info["case_name"], info["case_dir"], info["run_cmd"]
+            if not info["build_ok"]:
+                summary_rows.append({
+                    "case": case, "env": "build", "status": "build_failed",
+                    "time_s": f"{info['build_time']:.6f}", "match": "", "max_abs_err": "", "max_rel_err": "",
+                    "details": "make failed"
+                })
+                continue
 
-        out_file = result_path_for(case, "nvidia")
-        # 运行时用环境变量告诉程序把“最终结果”写到 out_file
-        extra_env = {RESULT_ENV: str(out_file)}
-        print(f"[NVIDIA] {case} -> {out_file}")
-        rc, _, tsec, to = run_bash(run_cmd, cwd=case_dir, use_env=False,
-                                   timeout_s=args.timeout, extra_env=extra_env)
+            out_file = result_path_for(case, "nvidia")
+            # 运行时用环境变量告诉程序把“最终结果”写到 out_file
+            extra_env = {RESULT_ENV: str(out_file)}
+            print(f"[NVIDIA] {case} -> {out_file}")
+            rc, _, tsec, to = run_bash(run_cmd, cwd=case_dir, use_env=False,
+                                       timeout_s=args.timeout, extra_env=extra_env)
 
-        vals = parse_result_file(out_file) if out_file.exists() else []
-        status = "timeout" if to else ("ok" if (rc == 0 and vals) else "run_failed")
-        det = f"{len(vals)} values" if vals else "result file missing or empty"
+            vals = parse_result_file(out_file) if out_file.exists() else []
+            status = "timeout" if to else ("ok" if (rc == 0 and vals) else "run_failed")
+            det = f"{len(vals)} values" if vals else "result file missing or empty"
 
-        summary_rows.append({
-            "case": case, "env": "nvidia", "status": status,
-            "time_s": f"{tsec:.6f}", "match": "baseline" if status == "ok" else "baseline_failed",
-            "max_abs_err": "", "max_rel_err": "", "details": det
-        })
+            summary_rows.append({
+                "case": case, "env": "nvidia", "status": status,
+                "time_s": f"{tsec:.6f}", "match": "baseline" if status == "ok" else "baseline_failed",
+                "max_abs_err": "", "max_rel_err": "", "details": det
+            })
 
     # 3) VENTUS 各后端
     print("\n=== 阶段 3：VENTUS 后端 ===")
@@ -304,6 +326,14 @@ def main():
     print(f"- 汇总 CSV: {results_dir / 'summary.csv'}")
     print(f"- 汇总 Markdown: {results_dir / 'summary.md'}")
     print(f"- 结果文件：results/<case>/<env>/final.hex (由程序直接生成)")
+
+    failed_cases = set()
+    for r in summary_rows:
+        if r["match"] not in ["pass", "baseline"]:
+            failed_cases.add(r["case"])
+    if failed_cases:
+        print(f"Failed cases: {failed_cases}")
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
