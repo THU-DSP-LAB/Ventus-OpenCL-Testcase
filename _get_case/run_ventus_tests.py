@@ -85,7 +85,7 @@ def run_bash(cmd: str, cwd: Path, use_env: bool=False, backend: Optional[str]=No
 
 def make_build(case_dir: Path, jobs: Optional[int]) -> Tuple[bool, str, float]:
     cmd = f"make -j{jobs}" if jobs and jobs > 1 else "make"
-    rc, out, el, _ = run_bash(cmd, cwd=case_dir, use_env=False, timeout_s=None)
+    rc, out, el, _ = run_bash(cmd, cwd=case_dir, use_env=True, timeout_s=None)
     return rc == 0, out, el
 
 def pick_run_cmd(case_dir: Path, exe_name: str, run_cmd_field: str) -> str:
@@ -179,6 +179,8 @@ def main():
         case_name = row["dir"].rstrip("/")
 
         ok, make_out, make_time = make_build(case_dir, args.jobs if args.jobs > 1 else None)
+        if not ok:
+            print(f"[ERROR]: Compile failed: {case_name}")
         case_infos.append({
             "case_name": case_name,
             "case_dir": case_dir,
@@ -263,9 +265,14 @@ def main():
     for be in backends:
         print(f"\n--- VENTUS_BACKEND = {be} ---")
         for info in case_infos:
-            if not info["build_ok"]:
-                continue
             case, case_dir, run_cmd = info["case_name"], info["case_dir"], info["run_cmd"]
+            if not info["build_ok"]:
+                summary_rows.append({
+                    "case": case, "env": be, "status": "compile_failed",
+                    "time_s": "-", "match": "fail",
+                    "max_abs_err": "-", "max_rel_err": "-", "details": "Compile Failed" 
+                })
+                continue
 
             baseline_file = result_path_for(case, "nvidia")
             baseline_vals = parse_result_file(baseline_file) if baseline_file.exists() else []
