@@ -52,7 +52,7 @@ def _compose_cmd(cmd: str, use_env: bool=False, backend: Optional[str]=None, ext
             prefix_parts.append(f"export {k}={shlex.quote(v)}")
     prefix = " && ".join(prefix_parts)
     full_cmd = cmd if not prefix else f"{prefix} && {cmd}"
-    return f"bash -lc {shlex.quote(full_cmd)}"
+    return f"bash -c {shlex.quote(full_cmd)}"
 
 def run_bash(cmd: str, cwd: Path, use_env: bool=False, backend: Optional[str]=None,
              timeout_s: Optional[float]=None, extra_env: Optional[dict]=None) -> Tuple[int, str, float, bool]:
@@ -75,11 +75,21 @@ def run_bash(cmd: str, cwd: Path, use_env: bool=False, backend: Optional[str]=No
         rc = proc.returncode
     except subprocess.TimeoutExpired:
         timed_out = True
-        try: os.killpg(proc.pid, signal.SIGKILL)
-        except Exception: pass
+        # 强制终止整个进程组，确保所有子进程都被kill
+        try: 
+            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+            time.sleep(0.5)
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        except Exception: 
+            pass
         try: out, _ = proc.communicate(timeout=5)
         except Exception: out = ""
         rc = 124
+    finally:
+        # 确保进程被清理
+        if proc.poll() is None:
+            try: proc.kill()
+            except Exception: pass
     elapsed = time.perf_counter() - start
     return rc, out, elapsed, timed_out
 
@@ -167,7 +177,24 @@ def main():
     backends = [x.strip() for x in args.backends.split(",") if x.strip()]
 
     results_dir = ROOT / "results"
+    
+    # 处理旧结果文件夹：重命名为带时间戳的备份
+    if results_dir.exists():
+        backup_name = f"results.backup.{time.strftime('%Y%m%d_%H%M%S')}"
+        backup_dir = ROOT / backup_name
+        print(f"[INFO] 发现旧结果文件夹，重命名为: {backup_name}")
+        try:
+            results_dir.rename(backup_dir)
+        except Exception as e:
+            print(f"[WARN] 重命名旧结果失败: {e}")
+            import shutil
+            shutil.rmtree(results_dir, ignore_errors=True)
+    
     ensure_dir(results_dir)
+    
+    # 创建CSV文件并写入表头，用于实时追加结果
+    summary_csv = results_dir / "summary.csv"
+    summary_csv.write_text("case,env,status,time_s,match,max_abs_err,max_rel_err,details\n", encoding="utf-8")
 
     # 1) 编译
     case_infos = []
@@ -209,6 +236,19 @@ def main():
         p = results_dir / case / env / "final.hex"
         p.parent.mkdir(parents=True, exist_ok=True)
         return p
+    
+    # 实时追加结果到CSV
+    def append_result(row: dict):
+        summary_rows.append(row)
+        print(f"[RESULT] {row['case']} | {row['env']} | {row['status']} | {row['time_s']}s | {row['match']}")
+        with summary_csv.open("a", encoding="utf-8") as f:
+            line = ",".join([
+                row["case"], row["env"], row["status"], row["time_s"], row["match"],
+                str(row["max_abs_err"]), str(row["max_rel_err"]), 
+                '"' + str(row["details"]).replace('"','""') + '"'
+            ])
+            f.write(line + "\n")
+            f.flush()  # 确保立即写入磁盘
 
     # 2) NVIDIA 基线
     if args.ref:
@@ -216,9 +256,17 @@ def main():
         ref_path = (ROOT / args.ref).resolve()
         if ref_path.exists():
             # 复制 ref_path 下所有内容到 results_dir
-            cmd = f"cp -r {shlex.quote(str(ref_path))}/* {shlex.quote(str(results_dir))}/"
-            print(f"Copying ref: {cmd}")
-            run_bash(cmd, cwd=ROOT)
+            import shutil
+            try:
+                for item in ref_path.iterdir():
+                    dst = results_dir / item.name
+                    if item.is_dir():
+                        shutil.copytree(item, dst, dirs_exist_ok=True)
+                    else:
+                        shutil.copy2(item, dst)
+                print(f"[INFO] 成功从 {ref_path} 复制参考结果")
+            except Exception as e:
+                print(f"[ERROR] 复制参考结果失败: {e}")
         else:
             print(f"[WARN] Ref path {ref_path} not found!")
 
@@ -226,7 +274,7 @@ def main():
             case = info["case_name"]
             out_file = result_path_for(case, "nvidia")
             vals = parse_result_file(out_file) if out_file.exists() else []
-            summary_rows.append({
+            append_result({
                 "case": case, "env": "nvidia", "status": "skipped(ref)",
                 "time_s": "0.000000", "match": "baseline" if vals else "missing",
                 "max_abs_err": "", "max_rel_err": "", "details": f"from ref, {len(vals)} values"
@@ -236,7 +284,7 @@ def main():
         for info in case_infos:
             case, case_dir, run_cmd = info["case_name"], info["case_dir"], info["run_cmd"]
             if not info["build_ok"]:
-                summary_rows.append({
+                append_result({
                     "case": case, "env": "build", "status": "build_failed",
                     "time_s": f"{info['build_time']:.6f}", "match": "", "max_abs_err": "", "max_rel_err": "",
                     "details": "make failed"
@@ -244,6 +292,9 @@ def main():
                 continue
 
             out_file = result_path_for(case, "nvidia")
+            # 清理可能存在的旧结果文件
+            if out_file.exists():
+                out_file.unlink()
             # 运行时用环境变量告诉程序把“最终结果”写到 out_file
             extra_env = {RESULT_ENV: str(out_file)}
             print(f"[NVIDIA] {case} -> {out_file}")
@@ -254,7 +305,7 @@ def main():
             status = "timeout" if to else ("ok" if (rc == 0 and vals) else "run_failed")
             det = f"{len(vals)} values" if vals else "result file missing or empty"
 
-            summary_rows.append({
+            append_result({
                 "case": case, "env": "nvidia", "status": status,
                 "time_s": f"{tsec:.6f}", "match": "baseline" if status == "ok" else "baseline_failed",
                 "max_abs_err": "", "max_rel_err": "", "details": det
@@ -267,7 +318,7 @@ def main():
         for info in case_infos:
             case, case_dir, run_cmd = info["case_name"], info["case_dir"], info["run_cmd"]
             if not info["build_ok"]:
-                summary_rows.append({
+                append_result({
                     "case": case, "env": be, "status": "compile_failed",
                     "time_s": "-", "match": "fail",
                     "max_abs_err": "-", "max_rel_err": "-", "details": "Compile Failed" 
@@ -278,6 +329,9 @@ def main():
             baseline_vals = parse_result_file(baseline_file) if baseline_file.exists() else []
 
             out_file = result_path_for(case, be)
+            # 清理可能存在的旧结果文件
+            if out_file.exists():
+                out_file.unlink()
             extra_env = {RESULT_ENV: str(out_file)}
             print(f"[{case}] {be} -> {out_file}")
             rc, _, tsec, to = run_bash(run_cmd, cwd=case_dir, use_env=True, backend=be,
@@ -297,7 +351,7 @@ def main():
             else:
                 match_str, max_abs, max_rel, details = "fail", "", "", "run failed/timeout or result missing"
 
-            summary_rows.append({
+            append_result({
                 "case": case, "env": be, "status": status,
                 "time_s": f"{tsec:.6f}", "match": match_str,
                 "max_abs_err": max_abs, "max_rel_err": max_rel, "details": details
@@ -317,16 +371,7 @@ def main():
             )
         summary_md.append("")
 
-    (results_dir / "summary.csv").write_text(
-        "\n".join(
-            [",".join(["case","env","status","time_s","match","max_abs_err","max_rel_err","details"])]
-            + [",".join([
-                r["case"], r["env"], r["status"], r["time_s"], r["match"],
-                str(r["max_abs_err"]), str(r["max_rel_err"]), '"' + str(r["details"]).replace('"','""') + '"'
-            ]) for r in summary_rows]
-        ),
-        encoding="utf-8"
-    )
+    # CSV已在运行过程中实时写入，此处仅生成Markdown报告
     (results_dir / "summary.md").write_text("\n".join(summary_md), encoding="utf-8")
 
     print("\n=== 完成 ===")
@@ -334,13 +379,25 @@ def main():
     print(f"- 汇总 Markdown: {results_dir / 'summary.md'}")
     print(f"- 结果文件：results/<case>/<env>/final.hex (由程序直接生成)")
 
+    # 检测失败的case
+    # 1. NVIDIA基线必须成功 (match="baseline")
+    # 2. VENTUS后端必须与基线匹配 (match="pass")
+    # 3. 任何 "fail", "baseline_failed", "no_baseline" (无基线无法验证) 都视为失败
     failed_cases = set()
     for r in summary_rows:
+        # 忽略 build 记录，因为编译失败会导致后续所有后端测试变为 fail，会被下方的逻辑捕获
+        if r["env"] == "build":
+            continue
+            
         if r["match"] not in ["pass", "baseline"]:
             failed_cases.add(r["case"])
+    
     if failed_cases:
-        print(f"Failed cases: {failed_cases}")
+        print(f"\n[FAIL] 失败的测试用例: {sorted(failed_cases)}")
         sys.exit(1)
+    else:
+        print(f"\n[PASS] 所有测试通过!")
+        sys.exit(0)
 
 if __name__ == "__main__":
     main()
