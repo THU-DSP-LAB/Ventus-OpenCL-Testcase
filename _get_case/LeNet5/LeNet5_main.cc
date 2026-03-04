@@ -1,4 +1,5 @@
 #include <CL/cl.h>
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -9,7 +10,6 @@
 #include <cassert>
 #include <iostream>
 #include <random>   // 固定种子用
-#include <iostream>
 #include <fstream>
 #include <sstream>
 #include "../common/ventus_result_io.h"
@@ -24,6 +24,10 @@ static const char* KPATH_GEMM      = "../AIops/GEMM/gemm.cl";
 static const int  NUM_CLASSES = 10;
 static const int  N = 1;                 // Batch 固定 1，布局 NCHW
 static const int  IN_C = 3, IN_H = 32, IN_W = 32;
+static const double REGRESSION_ATOL = 1e-4;
+static const double REGRESSION_RTOL = 1e-3;
+static const double REL_EPS = 1e-12;
+static const int MAX_MISMATCH_REPORT = 10;
 
 // ======= 固定随机种子工具 =======
 // 给每个数组（输入/每层权重/偏置等）分配独立 seed，避免生成顺序改变带来差异
@@ -251,9 +255,293 @@ static void run_add3d(cl_command_queue q, cl_kernel k_add,
     if (e!=CL_SUCCESS){ fprintf(stderr,"Enqueue add3d failed: %d\n", e); exit(1); }
 }
 
+struct LeNetCpuReferenceInput {
+    const Tensor& x0;
+    const ConvParams& conv1;
+    const ConvParams& conv2;
+    const std::vector<float>& fcW1;
+    const std::vector<float>& fcB1;
+    const std::vector<float>& fcW2;
+    const std::vector<float>& fcB2;
+    const std::vector<float>& fcW3;
+    const std::vector<float>& fcB3;
+};
+
+static void expect_size(const std::vector<float>& v, size_t expected, const char* name){
+    if (v.size() != expected) {
+        fprintf(stderr, "%s size mismatch: got=%zu expect=%zu\n", name, v.size(), expected);
+        exit(1);
+    }
+}
+
+static std::vector<float> cpu_conv2d_reference(
+    const std::vector<float>& input,
+    int in_c, int in_h, int in_w,
+    const ConvParams& p,
+    int do_relu)
+{
+    const int out_h = OUT_H(in_h, p.KH, p.SH, p.PH);
+    const int out_w = OUT_W(in_w, p.KW, p.SW, p.PW);
+    const int in_hw = in_h * in_w;
+    const int out_hw = out_h * out_w;
+    std::vector<float> output((size_t)p.OC * out_hw, 0.0f);
+
+    for (int oc = 0; oc < p.OC; ++oc) {
+        for (int oy = 0; oy < out_h; ++oy) {
+            for (int ox = 0; ox < out_w; ++ox) {
+                float sum = p.B.empty() ? 0.0f : p.B[oc];
+                for (int ic = 0; ic < in_c; ++ic) {
+                    for (int ky = 0; ky < p.KH; ++ky) {
+                        const int iy = oy * p.SH - p.PH + ky;
+                        if (iy < 0 || iy >= in_h) continue;
+                        for (int kx = 0; kx < p.KW; ++kx) {
+                            const int ix = ox * p.SW - p.PW + kx;
+                            if (ix < 0 || ix >= in_w) continue;
+                            const int in_idx = ic * in_hw + iy * in_w + ix;
+                            const int w_idx = oc * (in_c * p.KH * p.KW)
+                                            + ic * (p.KH * p.KW)
+                                            + ky * p.KW + kx;
+                            sum += input[in_idx] * p.W[w_idx];
+                        }
+                    }
+                }
+                if (do_relu && sum < 0.0f) sum = 0.0f;
+                output[oc * out_hw + oy * out_w + ox] = sum;
+            }
+        }
+    }
+    return output;
+}
+
+static void cpu_relu3d_inplace(std::vector<float>& x){
+    for (size_t i = 0; i < x.size(); ++i) {
+        if (x[i] < 0.0f) x[i] = 0.0f;
+    }
+}
+
+static std::vector<float> cpu_max_pool2d_reference(
+    const std::vector<float>& input,
+    int C, int IH, int IW,
+    int KH, int KW, int SH, int SW, int PH, int PW)
+{
+    const int OH = OUT_H(IH, KH, SH, PH);
+    const int OW = OUT_W(IW, KW, SW, PW);
+    const int in_hw = IH * IW;
+    const int out_hw = OH * OW;
+    std::vector<float> output((size_t)C * out_hw, 0.0f);
+
+    for (int c = 0; c < C; ++c) {
+        for (int oy = 0; oy < OH; ++oy) {
+            for (int ox = 0; ox < OW; ++ox) {
+                float acc = -INFINITY;
+                for (int ky = 0; ky < KH; ++ky) {
+                    const int iy = oy * SH - PH + ky;
+                    for (int kx = 0; kx < KW; ++kx) {
+                        const int ix = ox * SW - PW + kx;
+                        if (iy < 0 || iy >= IH || ix < 0 || ix >= IW) continue;
+                        const int idx = c * in_hw + iy * IW + ix;
+                        acc = std::max(acc, input[idx]);
+                    }
+                }
+                output[c * out_hw + oy * OW + ox] = acc;
+            }
+        }
+    }
+    return output;
+}
+
+static std::vector<float> cpu_gemm_reference(
+    const std::vector<float>& A,
+    const std::vector<float>& B,
+    int M, int K, int N,
+    int do_trans_a, int do_trans_b)
+{
+    std::vector<float> C((size_t)M * N, 0.0f);
+    for (int row = 0; row < M; ++row) {
+        for (int col = 0; col < N; ++col) {
+            float sum = 0.0f;
+            for (int k = 0; k < K; ++k) {
+                const float a_val = do_trans_a ? A[k * M + row] : A[row * K + k];
+                const float b_val = do_trans_b ? B[col * K + k] : B[k * N + col];
+                sum += a_val * b_val;
+            }
+            C[row * N + col] = sum;
+        }
+    }
+    return C;
+}
+
+static std::vector<float> cpu_add_reference(
+    const std::vector<float>& a,
+    const std::vector<float>& b)
+{
+    if (a.size() != b.size()) {
+        fprintf(stderr, "add input size mismatch: a=%zu b=%zu\n", a.size(), b.size());
+        exit(1);
+    }
+    std::vector<float> out(a.size(), 0.0f);
+    for (size_t i = 0; i < a.size(); ++i) {
+        out[i] = a[i] + b[i];
+    }
+    return out;
+}
+
+static std::vector<float> run_lenet5_cpu_reference(const LeNetCpuReferenceInput& in){
+    const int P_K = 2;
+    const int P_S = 2;
+    const int P_PAD = 0;
+    const int FC1_SIZE = 120;
+    const int FC2_SIZE = 84;
+    const int FLAT_K = 16 * 6 * 6;
+
+    const int y1_h = OUT_H(in.x0.H, in.conv1.KH, in.conv1.SH, in.conv1.PH);
+    const int y1_w = OUT_W(in.x0.W, in.conv1.KW, in.conv1.SW, in.conv1.PW);
+    std::vector<float> y1 = cpu_conv2d_reference(in.x0.host, in.x0.C, in.x0.H, in.x0.W, in.conv1, 0);
+    expect_size(y1, (size_t)in.conv1.OC * y1_h * y1_w, "y1");
+    cpu_relu3d_inplace(y1);
+
+    const int p1_h = OUT_H(y1_h, P_K, P_S, P_PAD);
+    const int p1_w = OUT_W(y1_w, P_K, P_S, P_PAD);
+    std::vector<float> p1 = cpu_max_pool2d_reference(y1, in.conv1.OC, y1_h, y1_w, P_K, P_K, P_S, P_S, P_PAD, P_PAD);
+    expect_size(p1, (size_t)in.conv1.OC * p1_h * p1_w, "p1");
+
+    const int y2_h = OUT_H(p1_h, in.conv2.KH, in.conv2.SH, in.conv2.PH);
+    const int y2_w = OUT_W(p1_w, in.conv2.KW, in.conv2.SW, in.conv2.PW);
+    std::vector<float> y2 = cpu_conv2d_reference(p1, in.conv2.IC, p1_h, p1_w, in.conv2, 0);
+    expect_size(y2, (size_t)in.conv2.OC * y2_h * y2_w, "y2");
+    cpu_relu3d_inplace(y2);
+
+    const int p2_h = OUT_H(y2_h, P_K, P_S, P_PAD);
+    const int p2_w = OUT_W(y2_w, P_K, P_S, P_PAD);
+    std::vector<float> p2 = cpu_max_pool2d_reference(y2, in.conv2.OC, y2_h, y2_w, P_K, P_K, P_S, P_S, P_PAD, P_PAD);
+    expect_size(p2, (size_t)in.conv2.OC * p2_h * p2_w, "p2");
+
+    expect_size(p2, FLAT_K, "flatten");
+    expect_size(in.fcW1, (size_t)FC1_SIZE * FLAT_K, "fcW1");
+    expect_size(in.fcB1, FC1_SIZE, "fcB1");
+    expect_size(in.fcW2, (size_t)FC2_SIZE * FC1_SIZE, "fcW2");
+    expect_size(in.fcB2, FC2_SIZE, "fcB2");
+    expect_size(in.fcW3, (size_t)NUM_CLASSES * FC2_SIZE, "fcW3");
+    expect_size(in.fcB3, NUM_CLASSES, "fcB3");
+
+    std::vector<float> fc1 = cpu_add_reference(cpu_gemm_reference(p2, in.fcW1, 1, FLAT_K, FC1_SIZE, 0, 0), in.fcB1);
+    cpu_relu3d_inplace(fc1);
+    std::vector<float> fc2 = cpu_add_reference(cpu_gemm_reference(fc1, in.fcW2, 1, FC1_SIZE, FC2_SIZE, 0, 0), in.fcB2);
+    cpu_relu3d_inplace(fc2);
+    return cpu_add_reference(cpu_gemm_reference(fc2, in.fcW3, 1, FC2_SIZE, NUM_CLASSES, 0, 0), in.fcB3);
+}
+
+static void print_logits(const char* title, const std::vector<float>& logits){
+    printf("== %s ==\n", title);
+    for (size_t i = 0; i < logits.size(); ++i) {
+        printf("%zu %.6f\n", i, logits[i]);
+    }
+}
+
+static bool maybe_inject_regression_error(std::vector<float>& out){
+    const char* idx_str = std::getenv("LENET5_INJECT_ERR_IDX");
+    if (!idx_str || !*idx_str) return false;
+
+    char* end_idx = nullptr;
+    const long idx = std::strtol(idx_str, &end_idx, 10);
+    if (end_idx == idx_str || *end_idx != '\0' || idx < 0 || (size_t)idx >= out.size()) {
+        fprintf(stderr, "Invalid LENET5_INJECT_ERR_IDX=%s, valid range=[0,%zu)\n", idx_str, out.size());
+        exit(1);
+    }
+
+    float delta = 1.0f;
+    const char* delta_str = std::getenv("LENET5_INJECT_ERR_DELTA");
+    if (delta_str && *delta_str) {
+        char* end_delta = nullptr;
+        const float parsed = std::strtof(delta_str, &end_delta);
+        if (end_delta != delta_str && *end_delta == '\0') {
+            delta = parsed;
+        } else {
+            fprintf(stderr, "Invalid LENET5_INJECT_ERR_DELTA=%s\n", delta_str);
+            exit(1);
+        }
+    }
+
+    const float before = out[(size_t)idx];
+    out[(size_t)idx] = before + delta;
+    fprintf(stderr,
+            "[DEBUG] Injected regression error at idx=%ld: %.9f -> %.9f (delta=%.9f)\n",
+            idx, before, out[(size_t)idx], delta);
+    return true;
+}
+
+static bool check_regression(
+    const std::vector<float>& opencl_out,
+    const std::vector<float>& cpu_ref,
+    double atol,
+    double rtol)
+{
+    const size_t n = std::min(opencl_out.size(), cpu_ref.size());
+    double max_abs_err = 0.0;
+    double max_rel_err = 0.0;
+    size_t worst_idx = 0;
+    std::vector<size_t> mismatch_indices;
+
+    for (size_t i = 0; i < n; ++i) {
+        const double abs_err = std::fabs((double)opencl_out[i] - (double)cpu_ref[i]);
+        const double bound = atol + rtol * std::fabs((double)cpu_ref[i]);
+        const double rel_err = abs_err / (std::fabs((double)cpu_ref[i]) + REL_EPS);
+        if (abs_err > max_abs_err) {
+            max_abs_err = abs_err;
+            max_rel_err = rel_err;
+            worst_idx = i;
+        }
+        if (abs_err > bound) {
+            mismatch_indices.push_back(i);
+        }
+    }
+
+    const bool size_match = opencl_out.size() == cpu_ref.size();
+    const size_t size_mismatch_cnt = size_match ? 0 : (std::max(opencl_out.size(), cpu_ref.size()) - n);
+    const size_t bad = mismatch_indices.size() + size_mismatch_cnt;
+
+    printf("Regression tolerance: atol=%.3e rtol=%.3e\n", atol, rtol);
+    printf("Compared elements: %zu, max_abs_err=%.6e, max_rel_err=%.6e (idx=%zu)\n",
+           n, max_abs_err, max_rel_err, worst_idx);
+
+    if (bad == 0) {
+        printf("Regression check PASSED\n");
+        return true;
+    }
+
+    fprintf(stderr,
+            "\n[REGRESSION][FAIL] opencl_size=%zu cpu_ref_size=%zu mismatches=%zu size_mismatch=%zu\n",
+            opencl_out.size(), cpu_ref.size(), mismatch_indices.size(), size_mismatch_cnt);
+    fprintf(stderr, " idx |    OpenCL    |   CPU_REF    |   ABS_ERR    |   REL_ERR    |    BOUND\n");
+    fprintf(stderr, "-----+--------------+--------------+--------------+--------------+--------------\n");
+
+    const size_t report_n = std::min(mismatch_indices.size(), (size_t)MAX_MISMATCH_REPORT);
+    for (size_t j = 0; j < report_n; ++j) {
+        const size_t i = mismatch_indices[j];
+        const double abs_err = std::fabs((double)opencl_out[i] - (double)cpu_ref[i]);
+        const double rel_err = abs_err / (std::fabs((double)cpu_ref[i]) + REL_EPS);
+        const double bound = atol + rtol * std::fabs((double)cpu_ref[i]);
+        fprintf(stderr, "%4zu | %12.6f | %12.6f | %12.6e | %12.6e | %12.6e\n",
+                i, opencl_out[i], cpu_ref[i], abs_err, rel_err, bound);
+    }
+    if (mismatch_indices.size() > report_n) {
+        fprintf(stderr, "... %zu more mismatches not shown\n", mismatch_indices.size() - report_n);
+    }
+    if (!size_match) {
+        if (opencl_out.size() > n) {
+            fprintf(stderr, "OpenCL extra outputs start at idx=%zu, count=%zu\n", n, opencl_out.size() - n);
+        }
+        if (cpu_ref.size() > n) {
+            fprintf(stderr, "CPU ref extra outputs start at idx=%zu, count=%zu\n", n, cpu_ref.size() - n);
+        }
+    }
+    return false;
+}
+
 int main() {
     // ==== 固定随机种子基值（可改） ====
     const uint32_t SEED_BASE = 0x13572468u;
+    int exit_code = 0;
 
     // OpenCL setup
     cl_int err = CL_SUCCESS;
@@ -349,6 +637,11 @@ int main() {
     fill_uniform(fcW3, -0.1f, 0.1f, seed_mix(SEED_BASE, 501));
     fill_uniform(fcB3, -0.1f, 0.1f, seed_mix(SEED_BASE, 502));
 
+    const LeNetCpuReferenceInput cpu_ref_input = {
+        x0, conv1, conv2, fcW1, fcB1, fcW2, fcB2, fcW3, fcB3
+    };
+    std::vector<float> cpu_ref_logits = run_lenet5_cpu_reference(cpu_ref_input);
+
     cl_mem d_fcW1 = make_device_buffer(ctx, fcW1.data(), sizeof(float) * fcW1.size(), &err);
     cl_mem d_fcB1 = make_device_buffer(ctx, fcB1.data(), sizeof(float) * fcB1.size(), &err);
     cl_mem d_fcW2 = make_device_buffer(ctx, fcW2.data(), sizeof(float) * fcW2.size(), &err);
@@ -396,10 +689,13 @@ int main() {
     // 下载并输出
     std::vector<float> out(NUM_CLASSES);
     download_tensor(q, logits.buf, out.data(), sizeof(float)*NUM_CLASSES);
+    maybe_inject_regression_error(out);
 
-    printf("== LeNet-5 logits (deterministic) ==\n");
-    for (int i=0;i<NUM_CLASSES;++i){
-        printf("%d %.6f\n", i, out[i]);
+    print_logits("LeNet-5 CPU reference logits", cpu_ref_logits);
+    print_logits("LeNet-5 OpenCL logits", out);
+    fflush(stdout);
+    if (!check_regression(out, cpu_ref_logits, REGRESSION_ATOL, REGRESSION_RTOL)) {
+        exit_code = 1;
     }
     ventus_write_final_hex(out);
 
@@ -433,5 +729,5 @@ int main() {
 
     clReleaseCommandQueue(q);
     clReleaseContext(ctx);
-    return 0;
+    return exit_code;
 }

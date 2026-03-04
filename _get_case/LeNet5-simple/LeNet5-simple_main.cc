@@ -9,10 +9,10 @@
 #include <cassert>
 #include <iostream>
 #include <random>
-#include <iostream>
 #include <fstream>
 #include <sstream>
 #include "../common/ventus_result_io.h"
+#include "lenet5_regression.h"
 // ======= Kernel 路径（与现有工程一致）=======
 static const char* KPATH_CONV      = "../AIops/conv_fused/conv_fused.cl"; // 修改为卷积+ReLU融合的kernel路径
 static const char* KPATH_POOL2D    = "../AIops/Pool2D/pool2d.cl";
@@ -23,6 +23,10 @@ static const char* KPATH_GEMM_PLAIN = "../AIops/GEMM/gemm.cl"; // 纯GEMM版本
 static const int  NUM_CLASSES = 10;
 static const int  N = 1;                 // Batch 固定 1，布局 NCHW
 static const int  IN_C = 3, IN_H = 32, IN_W = 32;
+static const uint32_t SEED_BASE = 0x13572468u;
+static const double DEFAULT_ATOL = 1e-2;
+static const double DEFAULT_RTOL = 1e-2;
+static const char* DEFAULT_CPU_REF_PATH = "cpu_reference.hex";
 
 // ======= 固定随机种子工具 =======
 static inline uint32_t seed_mix(uint32_t base, uint32_t tag){
@@ -154,6 +158,37 @@ static void init_gemm_seeded(GemmParams& p, cl_context ctx, uint32_t seed_w) {
     p.dW = make_device_buffer(ctx, p.W.data(), p.W.size() * sizeof(float));
 }
 
+static std::vector<float> run_cpu_reference(const Tensor& x0, const ConvParams& conv1, const ConvParams& conv2,
+                                            const GemmParams& fc1, const GemmParams& fc2, const GemmParams& fc3) {
+    const int pool_k = 2;
+    const int pool_s = 2;
+    const int pool_p = 0;
+
+    std::vector<float> y1, y2, y3, y4, fc1_out, fc2_out, fc3_out;
+    const CpuConvConfig conv1_cfg = {conv1.IC, x0.H, x0.W, conv1.OC, conv1.KH, conv1.KW,
+                                     OUT_H(x0.H, conv1.KH, conv1.SH, conv1.PH), OUT_W(x0.W, conv1.KW, conv1.SW, conv1.PW),
+                                     conv1.SH, conv1.SW, conv1.PH, conv1.PW};
+    conv2d_relu_cpu(x0.host, conv1.W, conv1_cfg, &y1);
+
+    const CpuPoolConfig pool1_cfg = {conv1_cfg.OC, conv1_cfg.OH, conv1_cfg.OW, pool_k, pool_k, pool_s, pool_s, pool_p, pool_p,
+                                     OUT_H(conv1_cfg.OH, pool_k, pool_s, pool_p), OUT_W(conv1_cfg.OW, pool_k, pool_s, pool_p), 0};
+    avg_pool2d_cpu(y1, pool1_cfg, &y2);
+
+    const CpuConvConfig conv2_cfg = {conv2.IC, pool1_cfg.OH, pool1_cfg.OW, conv2.OC, conv2.KH, conv2.KW,
+                                     OUT_H(pool1_cfg.OH, conv2.KH, conv2.SH, conv2.PH), OUT_W(pool1_cfg.OW, conv2.KW, conv2.SW, conv2.PW),
+                                     conv2.SH, conv2.SW, conv2.PH, conv2.PW};
+    conv2d_relu_cpu(y2, conv2.W, conv2_cfg, &y3);
+
+    const CpuPoolConfig pool2_cfg = {conv2_cfg.OC, conv2_cfg.OH, conv2_cfg.OW, pool_k, pool_k, pool_s, pool_s, pool_p, pool_p,
+                                     OUT_H(conv2_cfg.OH, pool_k, pool_s, pool_p), OUT_W(conv2_cfg.OW, pool_k, pool_s, pool_p), 0};
+    avg_pool2d_cpu(y3, pool2_cfg, &y4);
+
+    gemm_cpu(y4, fc1.W, {1, fc1.in_dim, fc1.out_dim, 0, 0, true}, &fc1_out);
+    gemm_cpu(fc1_out, fc2.W, {1, fc2.in_dim, fc2.out_dim, 0, 0, true}, &fc2_out);
+    gemm_cpu(fc2_out, fc3.W, {1, fc3.in_dim, fc3.out_dim, 0, 0, false}, &fc3_out);
+    return fc3_out;
+}
+
 // ======= 核函数调用封装 =======
 static void run_conv_layer(cl_command_queue q, cl_kernel k_conv,
                            cl_mem in, cl_mem w, cl_mem out,
@@ -231,7 +266,11 @@ static void run_gemm_layer(cl_command_queue q, cl_kernel k_gemm,
 }
 
 // ======= Forward: conv1 -> pool(2x2) -> conv2 -> pool(2x2) -> Flatten -> FC layers -> logits =======
-int main() {
+int main(int argc, char** argv) {
+    const RegressionOptions options = parse_options_or_exit(
+        argc, argv, DEFAULT_ATOL, DEFAULT_RTOL, DEFAULT_CPU_REF_PATH);
+    int exit_code = 0;
+
     // OpenCL setup
     cl_int err = CL_SUCCESS;
     cl_platform_id plat; cl_device_id dev;
@@ -254,12 +293,12 @@ int main() {
 
     // 初始化输入
     Tensor x0(IN_C, IN_H, IN_W);
-    fill_uniform_tensor(x0, -1.f, 1.f, seed_mix(0x13572468, 1)); // 输入 seed
+    fill_uniform_tensor(x0, -1.f, 1.f, seed_mix(SEED_BASE, 1)); // 输入 seed
     x0.buf = make_device_buffer(ctx, x0.host.data(), x0.bytes());
 
     // conv1 参数与执行
     ConvParams conv1; conv1.IC=IN_C; conv1.OC=6; conv1.KH=5; conv1.KW=5; conv1.SH=1; conv1.SW=1; conv1.PH=2; conv1.PW=2;
-    init_conv_seeded(conv1, ctx, seed_mix(0x13572468, 101));
+    init_conv_seeded(conv1, ctx, seed_mix(SEED_BASE, 101));
     Tensor y1(conv1.OC, OUT_H(x0.H, conv1.KH, conv1.SH, conv1.PH), OUT_W(x0.W, conv1.KW, conv1.SW, conv1.PW));
     y1.buf = make_device_buffer(ctx, nullptr, y1.bytes());
     zero_buffer(q, y1.buf, y1.bytes());
@@ -280,7 +319,7 @@ int main() {
 
     // conv2 参数与执行
     ConvParams conv2; conv2.IC=y2.C; conv2.OC=16; conv2.KH=5; conv2.KW=5; conv2.SH=1; conv2.SW=1; conv2.PH=0; conv2.PW=0;
-    init_conv_seeded(conv2, ctx, seed_mix(0x13572468, 102));
+    init_conv_seeded(conv2, ctx, seed_mix(SEED_BASE, 102));
     Tensor y3(conv2.OC, OUT_H(y2.H, conv2.KH, conv2.SH, conv2.PH), OUT_W(y2.W, conv2.KW, conv2.SW, conv2.PW));
     y3.buf = make_device_buffer(ctx, nullptr, y3.bytes());
     zero_buffer(q, y3.buf, y3.bytes());
@@ -301,7 +340,7 @@ int main() {
 
     // FC1 参数与执行 (with ReLU)
     GemmParams fc1; fc1.in_dim = flat_dim; fc1.out_dim = 120;
-    init_gemm_seeded(fc1, ctx, seed_mix(0x13572468, 103));
+    init_gemm_seeded(fc1, ctx, seed_mix(SEED_BASE, 103));
     Tensor fc1_out(1, 1, fc1.out_dim);
     fc1_out.buf = make_device_buffer(ctx, nullptr, fc1_out.bytes());
     zero_buffer(q, fc1_out.buf, fc1_out.bytes());
@@ -309,7 +348,7 @@ int main() {
 
     // FC2 参数与执行 (with ReLU)
     GemmParams fc2; fc2.in_dim = fc1.out_dim; fc2.out_dim = 84;
-    init_gemm_seeded(fc2, ctx, seed_mix(0x13572468, 104));
+    init_gemm_seeded(fc2, ctx, seed_mix(SEED_BASE, 104));
     Tensor fc2_out(1, 1, fc2.out_dim);
     fc2_out.buf = make_device_buffer(ctx, nullptr, fc2_out.bytes());
     zero_buffer(q, fc2_out.buf, fc2_out.bytes());
@@ -317,7 +356,7 @@ int main() {
 
     // FC3 参数与执行 (no ReLU)
     GemmParams fc3; fc3.in_dim = fc2.out_dim; fc3.out_dim = NUM_CLASSES;
-    init_gemm_seeded(fc3, ctx, seed_mix(0x13572468, 105));
+    init_gemm_seeded(fc3, ctx, seed_mix(SEED_BASE, 105));
     Tensor fc3_out(1, 1, fc3.out_dim);
     fc3_out.buf = make_device_buffer(ctx, nullptr, fc3_out.bytes());
     zero_buffer(q, fc3_out.buf, fc3_out.bytes());
@@ -328,10 +367,56 @@ int main() {
 
     // 下载 logits 输出
     download_tensor(q, fc3_out.buf, fc3_out.host.data(), fc3_out.bytes());
-    printf("== LeNet-5 logits (deterministic) ==\n");
+    const std::vector<float> cpu_ref = run_cpu_reference(x0, conv1, conv2, fc1, fc2, fc3);
+    if (!write_hex_file(cpu_ref, options.cpu_ref_path)) {
+        exit_code = 1;
+    }
+
+    const RegressionStats stats = compare_outputs(cpu_ref, fc3_out.host, options.rtol, options.atol);
+    printf("== CPU reference logits ==\n");
+    for (int i = 0; i < NUM_CLASSES; ++i) {
+        printf("%d: %.6f\n", i, cpu_ref[i]);
+    }
+    printf("== OpenCL logits ==\n");
     for (int i = 0; i < NUM_CLASSES; ++i) {
         printf("%d: %.6f\n", i, fc3_out.host[i]);
     }
+    printf("CPU reference file: %s\n", options.cpu_ref_path.c_str());
+    printf("Tolerance: atol=%.6e, rtol=%.6e\n", options.atol, options.rtol);
+    if (!stats.size_match || stats.mismatch > 0) {
+        fprintf(stderr,
+                "[REGRESSION FAILED] mismatch=%d compared=%d size_match=%d max_abs=%e max_rel=%e worst_idx=%d ref=%f got=%f tol=%e\n",
+                stats.mismatch, stats.compared, stats.size_match ? 1 : 0,
+                stats.max_abs_err, stats.max_rel_err, stats.worst_index,
+                stats.worst_ref, stats.worst_got, stats.worst_tol);
+        fprintf(stderr, "==== MISMATCH DETAILS ====\n");
+        if (!stats.size_match) {
+            fprintf(stderr, "[SIZE] ref_len=%zu got_len=%zu\n", cpu_ref.size(), fc3_out.host.size());
+        }
+        const int compare_n = (int)((cpu_ref.size() < fc3_out.host.size()) ? cpu_ref.size() : fc3_out.host.size());
+        int printed = 0;
+        for (int i = 0; i < compare_n; ++i) {
+            double abs_err = 0.0;
+            double rel_err = 0.0;
+            double tol = 0.0;
+            if (!exceeds_tolerance(cpu_ref[i], fc3_out.host[i], options.rtol, options.atol, &abs_err, &rel_err, &tol)) {
+                continue;
+            }
+            fprintf(stderr,
+                    "[BAD] class=%d ref=%+.9f got=%+.9f abs=%0.3e rel=%0.3e tol=%0.3e\n",
+                    i, cpu_ref[i], fc3_out.host[i], abs_err, rel_err, tol);
+            ++printed;
+        }
+        if (printed == 0 && stats.size_match) {
+            fprintf(stderr, "[INFO] no element exceeded tolerance\n");
+        }
+        fprintf(stderr, "==========================\n");
+        exit_code = 2;
+    } else {
+        printf("[REGRESSION PASS] compared=%d max_abs=%e max_rel=%e\n",
+               stats.compared, stats.max_abs_err, stats.max_rel_err);
+    }
+
     ventus_write_final_hex(fc3_out.host);
 
     // 清理资源 (可选，但推荐)
@@ -346,5 +431,5 @@ int main() {
     clReleaseProgram(K.prog_gemm_plain);
     clReleaseCommandQueue(q); clReleaseContext(ctx);
 
-    return 0;
+    return exit_code;
 }

@@ -12,6 +12,6 @@ object*.cl
 object*.dump
 .idea/*
 _get_case/results/*
-# *.hex
+*.hex
 *.out
 *.log

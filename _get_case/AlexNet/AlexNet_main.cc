@@ -3,12 +3,13 @@
 #include <cstdlib>
 #include <cstring>
 #include <cmath>
+#include <cerrno>
 #include <vector>
 #include <string>
 #include <cassert>
 #include <iostream>
+#include <limits>
 #include <random>   // 固定随机种子
-#include <iostream>
 #include <fstream>
 #include <sstream>
 #include "../common/ventus_result_io.h"
@@ -161,6 +162,331 @@ static void init_conv_seeded(ConvParams& p, uint32_t seed_w, uint32_t seed_b) {
 static inline int OUT_H(int IH,int KH,int SH,int PH) { return (IH + 2*PH - KH) / SH + 1; }
 static inline int OUT_W(int IW,int KW,int SW,int PW) { return (IW + 2*PW - KW) / SW + 1; }
 
+struct RunOptions {
+    bool check_cpu_ref = true;
+    float atol = 1e-4f;
+    float rtol = 1e-4f;
+};
+
+static void print_usage(const char* prog){
+    fprintf(stderr,
+        "Usage: %s [--cpu-ref|--no-cpu-ref] [--atol <float>] [--rtol <float>]\n"
+        "  --cpu-ref      Enable CPU reference validation (default)\n"
+        "  --no-cpu-ref   Disable CPU reference validation\n"
+        "  --atol <v>     Absolute tolerance for validation (default: 1e-4)\n"
+        "  --rtol <v>     Relative tolerance for validation (default: 1e-4)\n"
+        "  --help         Show this help message\n",
+        prog
+    );
+}
+
+static bool parse_non_negative_float(const char* text, float& out){
+    errno = 0;
+    char* end = nullptr;
+    const float v = strtof(text, &end);
+    if (errno != 0 || end == text || *end != '\0' || v < 0.0f){
+        return false;
+    }
+    out = v;
+    return true;
+}
+
+static int parse_args(int argc, char** argv, RunOptions& opt){
+    for (int i = 1; i < argc; ++i){
+        const char* arg = argv[i];
+        if (strcmp(arg, "--cpu-ref") == 0){
+            opt.check_cpu_ref = true;
+            continue;
+        }
+        if (strcmp(arg, "--no-cpu-ref") == 0){
+            opt.check_cpu_ref = false;
+            continue;
+        }
+        if (strcmp(arg, "--atol") == 0 || strcmp(arg, "--rtol") == 0){
+            if (i + 1 >= argc){
+                fprintf(stderr, "缺少参数值: %s\n", arg);
+                print_usage(argv[0]);
+                return 2;
+            }
+            float value = 0.0f;
+            if (!parse_non_negative_float(argv[i + 1], value)){
+                fprintf(stderr, "非法浮点参数: %s %s\n", arg, argv[i + 1]);
+                return 2;
+            }
+            if (strcmp(arg, "--atol") == 0) opt.atol = value;
+            else opt.rtol = value;
+            ++i;
+            continue;
+        }
+        if (strcmp(arg, "--help") == 0 || strcmp(arg, "-h") == 0){
+            print_usage(argv[0]);
+            return 1;
+        }
+        fprintf(stderr, "未知参数: %s\n", arg);
+        print_usage(argv[0]);
+        return 2;
+    }
+    return 0;
+}
+
+struct HostTensor3D {
+    int C = 0;
+    int H = 0;
+    int W = 0;
+    std::vector<float> data;
+    HostTensor3D() = default;
+    HostTensor3D(int c, int h, int w) : C(c), H(h), W(w), data((size_t)c * h * w) {}
+};
+
+static inline size_t idx3d(int c, int y, int x, int H, int W){
+    return (size_t)c * (size_t)H * (size_t)W + (size_t)y * (size_t)W + (size_t)x;
+}
+
+static HostTensor3D cpu_conv2d(const HostTensor3D& in, const ConvParams& p, int do_relu){
+    HostTensor3D out(p.OC, OUT_H(in.H, p.KH, p.SH, p.PH), OUT_W(in.W, p.KW, p.SW, p.PW));
+    for (int oc = 0; oc < out.C; ++oc){
+        for (int oy = 0; oy < out.H; ++oy){
+            for (int ox = 0; ox < out.W; ++ox){
+                float sum = p.B.empty() ? 0.0f : p.B[oc];
+                for (int ic = 0; ic < p.IC; ++ic){
+                    for (int ky = 0; ky < p.KH; ++ky){
+                        const int iy = oy * p.SH - p.PH + ky;
+                        if (iy < 0 || iy >= in.H) continue;
+                        for (int kx = 0; kx < p.KW; ++kx){
+                            const int ix = ox * p.SW - p.PW + kx;
+                            if (ix < 0 || ix >= in.W) continue;
+                            const size_t in_idx = idx3d(ic, iy, ix, in.H, in.W);
+                            const size_t w_idx = (size_t)oc * p.IC * p.KH * p.KW
+                                               + (size_t)ic * p.KH * p.KW
+                                               + (size_t)ky * p.KW + kx;
+                            sum += in.data[in_idx] * p.W[w_idx];
+                        }
+                    }
+                }
+                if (do_relu && sum < 0.0f) sum = 0.0f;
+                out.data[idx3d(oc, oy, ox, out.H, out.W)] = sum;
+            }
+        }
+    }
+    return out;
+}
+
+static HostTensor3D cpu_relu3d(const HostTensor3D& in){
+    HostTensor3D out(in.C, in.H, in.W);
+    for (size_t i = 0; i < in.data.size(); ++i){
+        const float v = in.data[i];
+        out.data[i] = (v > 0.0f) ? v : 0.0f;
+    }
+    return out;
+}
+
+static HostTensor3D cpu_pool2d(const HostTensor3D& in,
+                               int KH, int KW, int SH, int SW, int PH, int PW,
+                               int mode, int count_include_pad){
+    HostTensor3D out(in.C, OUT_H(in.H, KH, SH, PH), OUT_W(in.W, KW, SW, PW));
+    for (int c = 0; c < out.C; ++c){
+        for (int oy = 0; oy < out.H; ++oy){
+            for (int ox = 0; ox < out.W; ++ox){
+                float acc = (mode == 0) ? -std::numeric_limits<float>::infinity() : 0.0f;
+                int count = 0;
+                for (int ky = 0; ky < KH; ++ky){
+                    const int iy = oy * SH - PH + ky;
+                    for (int kx = 0; kx < KW; ++kx){
+                        const int ix = ox * SW - PW + kx;
+                        const bool valid = (iy >= 0 && iy < in.H && ix >= 0 && ix < in.W);
+                        if (mode == 0){
+                            if (valid){
+                                const float v = in.data[idx3d(c, iy, ix, in.H, in.W)];
+                                acc = fmax(acc, v);
+                            }
+                            continue;
+                        }
+                        const float v = valid ? in.data[idx3d(c, iy, ix, in.H, in.W)] : 0.0f;
+                        if (count_include_pad || valid){
+                            acc += v;
+                            ++count;
+                        }
+                    }
+                }
+                if (mode == 1) acc = (count > 0) ? (acc / (float)count) : 0.0f;
+                out.data[idx3d(c, oy, ox, out.H, out.W)] = acc;
+            }
+        }
+    }
+    return out;
+}
+
+static std::vector<float> cpu_gemm(const std::vector<float>& A,
+                                   const std::vector<float>& B,
+                                   int M, int K, int N,
+                                   int do_trans_a, int do_trans_b){
+    std::vector<float> C((size_t)M * N, 0.0f);
+    for (int row = 0; row < M; ++row){
+        for (int col = 0; col < N; ++col){
+            float sum = 0.0f;
+            for (int k = 0; k < K; ++k){
+                const float a_val = do_trans_a ? A[(size_t)k * M + row] : A[(size_t)row * K + k];
+                const float b_val = do_trans_b ? B[(size_t)col * K + k] : B[(size_t)k * N + col];
+                sum += a_val * b_val;
+            }
+            C[(size_t)row * N + col] = sum;
+        }
+    }
+    return C;
+}
+
+static std::vector<float> cpu_add_1d(const std::vector<float>& a, const std::vector<float>& b){
+    if (a.size() != b.size()){
+        fprintf(stderr, "cpu_add_1d size mismatch: %zu vs %zu\n", a.size(), b.size());
+        exit(1);
+    }
+    std::vector<float> out(a.size(), 0.0f);
+    for (size_t i = 0; i < a.size(); ++i){
+        out[i] = a[i] + b[i];
+    }
+    return out;
+}
+
+static std::vector<float> cpu_relu_1d(const std::vector<float>& in){
+    std::vector<float> out(in.size(), 0.0f);
+    for (size_t i = 0; i < in.size(); ++i){
+        const float v = in[i];
+        out[i] = (v > 0.0f) ? v : 0.0f;
+    }
+    return out;
+}
+
+struct CpuRefContext {
+    const Tensor& x0;
+    const ConvParams& conv1;
+    const ConvParams& conv2;
+    const ConvParams& conv3;
+    const ConvParams& conv4;
+    const ConvParams& conv5;
+    const std::vector<float>& fcW1;
+    const std::vector<float>& fcB1;
+    const std::vector<float>& fcW2;
+    const std::vector<float>& fcB2;
+    const std::vector<float>& fcW3;
+    const std::vector<float>& fcB3;
+    int fc1_size;
+    int fc2_size;
+
+    CpuRefContext(const Tensor& x0_,
+                  const ConvParams& conv1_,
+                  const ConvParams& conv2_,
+                  const ConvParams& conv3_,
+                  const ConvParams& conv4_,
+                  const ConvParams& conv5_,
+                  const std::vector<float>& fcW1_,
+                  const std::vector<float>& fcB1_,
+                  const std::vector<float>& fcW2_,
+                  const std::vector<float>& fcB2_,
+                  const std::vector<float>& fcW3_,
+                  const std::vector<float>& fcB3_,
+                  int fc1_size_,
+                  int fc2_size_)
+        : x0(x0_),
+          conv1(conv1_),
+          conv2(conv2_),
+          conv3(conv3_),
+          conv4(conv4_),
+          conv5(conv5_),
+          fcW1(fcW1_),
+          fcB1(fcB1_),
+          fcW2(fcW2_),
+          fcB2(fcB2_),
+          fcW3(fcW3_),
+          fcB3(fcB3_),
+          fc1_size(fc1_size_),
+          fc2_size(fc2_size_) {}
+};
+
+static void validate_fc_shapes(const CpuRefContext& ctx, int flat_k){
+    const size_t w1_expect = (size_t)ctx.fc1_size * flat_k;
+    const size_t w2_expect = (size_t)ctx.fc2_size * ctx.fc1_size;
+    const size_t w3_expect = (size_t)NUM_CLASSES * ctx.fc2_size;
+    if (ctx.fcW1.size() != w1_expect || ctx.fcB1.size() != (size_t)ctx.fc1_size ||
+        ctx.fcW2.size() != w2_expect || ctx.fcB2.size() != (size_t)ctx.fc2_size ||
+        ctx.fcW3.size() != w3_expect || ctx.fcB3.size() != (size_t)NUM_CLASSES){
+        fprintf(stderr, "CPU reference FC 参数尺寸不匹配\n");
+        exit(1);
+    }
+}
+
+static std::vector<float> run_cpu_reference_logits(const CpuRefContext& ctx){
+    HostTensor3D x(ctx.x0.C, ctx.x0.H, ctx.x0.W);
+    x.data = ctx.x0.host;
+    const int P1_K = 3, P1_S = 2, P_PAD = 0;
+
+    HostTensor3D y1 = cpu_conv2d(x, ctx.conv1, 0);
+    HostTensor3D r1 = cpu_relu3d(y1);
+    HostTensor3D p1 = cpu_pool2d(r1, P1_K, P1_K, P1_S, P1_S, P_PAD, P_PAD, 0, 0);
+
+    HostTensor3D y2 = cpu_conv2d(p1, ctx.conv2, 0);
+    HostTensor3D r2 = cpu_relu3d(y2);
+    HostTensor3D p2 = cpu_pool2d(r2, P1_K, P1_K, P1_S, P1_S, P_PAD, P_PAD, 0, 0);
+
+    HostTensor3D y3 = cpu_conv2d(p2, ctx.conv3, 0);
+    HostTensor3D r3 = cpu_relu3d(y3);
+
+    HostTensor3D y4 = cpu_conv2d(r3, ctx.conv4, 0);
+    HostTensor3D r4 = cpu_relu3d(y4);
+
+    HostTensor3D y5 = cpu_conv2d(r4, ctx.conv5, 0);
+    HostTensor3D r5 = cpu_relu3d(y5);
+    HostTensor3D p5 = cpu_pool2d(r5, P1_K, P1_K, P1_S, P1_S, P_PAD, P_PAD, 0, 0);
+
+    const int flat_k = p5.C * p5.H * p5.W;
+    validate_fc_shapes(ctx, flat_k);
+
+    const std::vector<float> fc1_mm = cpu_gemm(p5.data, ctx.fcW1, 1, flat_k, ctx.fc1_size, 0, 0);
+    const std::vector<float> fc1_out = cpu_add_1d(fc1_mm, ctx.fcB1);
+    const std::vector<float> fc1_relu = cpu_relu_1d(fc1_out);
+
+    const std::vector<float> fc2_mm = cpu_gemm(fc1_relu, ctx.fcW2, 1, ctx.fc1_size, ctx.fc2_size, 0, 0);
+    const std::vector<float> fc2_out = cpu_add_1d(fc2_mm, ctx.fcB2);
+    const std::vector<float> fc2_relu = cpu_relu_1d(fc2_out);
+
+    const std::vector<float> fc3_mm = cpu_gemm(fc2_relu, ctx.fcW3, 1, ctx.fc2_size, NUM_CLASSES, 0, 0);
+    return cpu_add_1d(fc3_mm, ctx.fcB3);
+}
+
+static bool check_cpu_reference(const std::vector<float>& got,
+                                const std::vector<float>& ref,
+                                float atol,
+                                float rtol){
+    if (got.size() != ref.size()){
+        fprintf(stderr, "[CPU-REF] size mismatch: got=%zu ref=%zu\n", got.size(), ref.size());
+        return false;
+    }
+    bool ok = true;
+    float max_abs = 0.0f;
+    float max_rel = 0.0f;
+    for (size_t i = 0; i < got.size(); ++i){
+        const float abs_err = fabs(got[i] - ref[i]);
+        const float rel_err = abs_err / (fabs(ref[i]) + 1e-20f);
+        const float tol = atol + rtol * fabs(ref[i]);
+        if (abs_err > max_abs) max_abs = abs_err;
+        if (rel_err > max_rel) max_rel = rel_err;
+        if (abs_err > tol){
+            fprintf(stderr,
+                "[CPU-REF] mismatch idx=%zu got=%.8f ref=%.8f abs=%.8g tol=%.8g\n",
+                i, got[i], ref[i], abs_err, tol);
+            ok = false;
+        }
+    }
+    if (ok){
+        printf("[CPU-REF] PASS atol=%.3e rtol=%.3e max_abs=%.6g max_rel=%.6g\n",
+               atol, rtol, max_abs, max_rel);
+    } else {
+        fprintf(stderr,
+            "[CPU-REF] FAIL atol=%.3e rtol=%.3e max_abs=%.6g max_rel=%.6g\n",
+            atol, rtol, max_abs, max_rel);
+    }
+    return ok;
+}
+
 // ======= 运行封装 =======
 static void run_conv_layer(cl_command_queue q, cl_kernel k_conv,
                            cl_mem in, cl_mem w, cl_mem b, cl_mem out,
@@ -264,7 +590,12 @@ static void run_add3d(cl_command_queue q, cl_kernel k_add,
     if (e!=CL_SUCCESS){ fprintf(stderr,"Enqueue add3d failed: %d\n", e); exit(1); }
 }
 
-int main() {
+int main(int argc, char** argv) {
+    RunOptions run_options;
+    const int parse_rc = parse_args(argc, argv, run_options);
+    if (parse_rc == 1) return 0;
+    if (parse_rc != 0) return parse_rc;
+
     // 全局基种子（可改以得到另一组可复现结果）
     const uint32_t SEED_BASE = 0x13572468u;
 
@@ -476,6 +807,21 @@ int main() {
     }
     ventus_write_final_hex(out);
 
+    int exit_code = 0;
+    if (run_options.check_cpu_ref){
+        const CpuRefContext ref_ctx{
+            x0, conv1, conv2, conv3, conv4, conv5,
+            fcW1, fcB1, fcW2, fcB2, fcW3, fcB3,
+            FC1_SIZE, FC2_SIZE
+        };
+        const std::vector<float> ref = run_cpu_reference_logits(ref_ctx);
+        if (!check_cpu_reference(out, ref, run_options.atol, run_options.rtol)){
+            exit_code = 3;
+        }
+    } else {
+        printf("[CPU-REF] SKIP\n");
+    }
+
     // 资源释放
     clReleaseMemObject(x0.buf);
     clReleaseMemObject(y1.buf); clReleaseMemObject(r1.buf); clReleaseMemObject(p1.buf);
@@ -515,5 +861,5 @@ int main() {
 
     clReleaseCommandQueue(q);
     clReleaseContext(ctx);
-    return 0;
+    return exit_code;
 }
