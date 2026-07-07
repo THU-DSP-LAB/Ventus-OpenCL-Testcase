@@ -11,6 +11,9 @@
 #include "VulkanRaytracingSample.h"
 #include "VulkanglTFModel.h"
 
+#include <cstdlib>
+#include <fstream>
+
 class VulkanExample : public VulkanRaytracingSample
 {
 public:
@@ -38,11 +41,13 @@ public:
 	std::array<VkDescriptorSet, maxConcurrentFrames> descriptorSets{};
 
 	vkglTF::Model scene;
+	bool storageScreenshotSaved{ false };
 
 	// This sample is derived from an extended base class that saves most of the ray tracing setup boiler plate
 	VulkanExample() : VulkanRaytracingSample()
 	{
 		title = "Ray traced shadows";
+		settings.overlay = false;
 		timerSpeed *= 0.25f;
 		camera.type = Camera::CameraType::lookat;
 		camera.setPerspective(60.0f, (float)width / (float)height, 0.1f, 512.0f);
@@ -76,7 +81,11 @@ public:
 		// The shaders are accessing the vertex and index buffers of the scene, so the proper usage flag has to be set on the vertex and index buffers for the scene
 		vkglTF::memoryPropertyFlags = VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
 		const uint32_t glTFLoadingFlags = vkglTF::FileLoadingFlags::PreTransformVertices | vkglTF::FileLoadingFlags::PreMultiplyVertexColors | vkglTF::FileLoadingFlags::FlipY;
-		scene.loadFromFile(getAssetPath() + "models/vulkanscene_shadow.gltf", vulkanDevice, queue, glTFLoadingFlags);
+		const char* overrideAsset = std::getenv("RT_SHADOW_ASSET");
+		const std::string sceneAsset = (overrideAsset && overrideAsset[0])
+			? std::string(overrideAsset)
+			: getAssetPath() + "models/vulkanscene_shadow.gltf";
+		scene.loadFromFile(sceneAsset, vulkanDevice, queue, glTFLoadingFlags);
 
 		VkDeviceOrHostAddressConstKHR vertexBufferDeviceAddress{};
 		VkDeviceOrHostAddressConstKHR indexBufferDeviceAddress{};
@@ -558,9 +567,96 @@ public:
 			VK_IMAGE_LAYOUT_GENERAL,
 			subresourceRange);
 
-		drawUI(cmdBuffer, frameBuffers[currentImageIndex]);
+		if (settings.overlay) {
+			drawUI(cmdBuffer, frameBuffers[currentImageIndex]);
+		}
 
 		VK_CHECK_RESULT(vkEndCommandBuffer(cmdBuffer));
+	}
+
+	void saveStorageImage(const char* filename)
+	{
+		const VkDeviceSize pixelSize = 4;
+		const VkDeviceSize bufferSize = static_cast<VkDeviceSize>(width) * height * pixelSize;
+
+		vks::Buffer readbackBuffer;
+		VK_CHECK_RESULT(vulkanDevice->createBuffer(
+			VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+			&readbackBuffer,
+			bufferSize));
+
+		VkCommandBuffer copyCmd = vulkanDevice->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);
+		const VkImageSubresourceRange subresourceRange{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+
+		vks::tools::insertImageMemoryBarrier(
+			copyCmd,
+			storageImage.image,
+			VK_ACCESS_SHADER_WRITE_BIT,
+			VK_ACCESS_TRANSFER_READ_BIT,
+			VK_IMAGE_LAYOUT_GENERAL,
+			VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+			VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
+			VK_PIPELINE_STAGE_TRANSFER_BIT,
+			subresourceRange);
+
+		VkBufferImageCopy copyRegion{};
+		copyRegion.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		copyRegion.imageSubresource.layerCount = 1;
+		copyRegion.imageExtent = { width, height, 1 };
+		vkCmdCopyImageToBuffer(copyCmd, storageImage.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, readbackBuffer.buffer, 1, &copyRegion);
+
+		vks::tools::insertImageMemoryBarrier(
+			copyCmd,
+			storageImage.image,
+			VK_ACCESS_TRANSFER_READ_BIT,
+			VK_ACCESS_SHADER_WRITE_BIT,
+			VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+			VK_IMAGE_LAYOUT_GENERAL,
+			VK_PIPELINE_STAGE_TRANSFER_BIT,
+			VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
+			subresourceRange);
+
+		vulkanDevice->flushCommandBuffer(copyCmd, queue);
+
+		VK_CHECK_RESULT(readbackBuffer.map());
+		auto* pixels = static_cast<const uint8_t*>(readbackBuffer.mapped);
+		const bool bgr = (storageImage.format == VK_FORMAT_B8G8R8A8_SRGB) ||
+			(storageImage.format == VK_FORMAT_B8G8R8A8_UNORM) ||
+			(storageImage.format == VK_FORMAT_B8G8R8A8_SNORM);
+
+		std::ofstream file(filename, std::ios::out | std::ios::binary);
+		file << "P6\n" << width << " " << height << "\n255\n";
+		for (uint32_t i = 0; i < width * height; i++) {
+			const uint8_t* p = pixels + i * pixelSize;
+			if (bgr) {
+				file.put(static_cast<char>(p[2]));
+				file.put(static_cast<char>(p[1]));
+				file.put(static_cast<char>(p[0]));
+			} else {
+				file.put(static_cast<char>(p[0]));
+				file.put(static_cast<char>(p[1]));
+				file.put(static_cast<char>(p[2]));
+			}
+		}
+		file.close();
+
+		readbackBuffer.destroy();
+		std::cout << "Ray tracing storage image saved to " << filename << std::endl;
+	}
+
+	void saveStorageImageIfRequested()
+	{
+		if (storageScreenshotSaved) {
+			return;
+		}
+		const char* filename = std::getenv("RT_SHADOW_SCREENSHOT");
+		if ((filename == nullptr) || (filename[0] == '\0')) {
+			return;
+		}
+		VK_CHECK_RESULT(vkDeviceWaitIdle(device));
+		saveStorageImage(filename);
+		storageScreenshotSaved = true;
 	}
 
 	virtual void render()
@@ -571,6 +667,7 @@ public:
 		updateUniformBuffers();
 		buildCommandBuffer();
 		VulkanExampleBase::submitFrame();
+		saveStorageImageIfRequested();
 	}
 };
 
