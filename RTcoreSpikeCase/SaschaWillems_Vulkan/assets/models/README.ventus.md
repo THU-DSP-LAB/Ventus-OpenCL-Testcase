@@ -8,6 +8,39 @@ The Ventus testcase intentionally vendors the small set of upstream assets
 needed by its checked-in ray-tracing examples.  This avoids a nested assets
 submodule and makes a checkout sufficient for deterministic full-app tests.
 
+Complete RT asset closure
+-------------------------
+
+All runtime assets referenced by the checked-in hardware ray-tracing examples
+were restored from `SaschaWillems/Vulkan-Assets` commit
+`a27c0e584434d59b7c7a714e9180eefca6f0ec4b`, the assets revision pinned by
+the matching upstream `SaschaWillems/Vulkan` source.  They are intentionally
+tracked as ordinary testcase files, not as a submodule:
+
+| Example | Vendored runtime path |
+| --- | --- |
+| `raytracingtextures` | `assets/textures/gratefloor_rgba.ktx` |
+| `raytracingreflections` | `assets/models/reflection_scene.gltf` |
+| `raytracingshadows` | `assets/models/vulkanscene_shadow.gltf` |
+| `raytracingpositionfetch` | `assets/models/treasure_smooth.gltf` |
+| `raytracinggltf` | `assets/models/FlightHelmet/` (glTF, binary buffer, and textures) |
+
+The other checked-in RT examples create their geometry procedurally and have
+no external runtime asset dependency.  The imported closure is 61 MiB.  Run
+an example against these local assets with its existing resource-path option:
+
+```sh
+./build/bin/raytracingtextures --resourcepath "$(pwd)"
+```
+
+The full-app Spike runner accepts the same option through `APP_ARGS`, e.g.:
+
+```sh
+APP=build/bin/raytracingtextures \
+APP_ARGS="--resourcepath $(pwd)" \
+tools/rtcore/run_full_app_spike.sh
+```
+
 `reflection_scene.gltf` is the complete scene used by the real
 `raytracingreflections` sample.  It was restored from:
 
