@@ -1,0 +1,65 @@
+{
+  "version": 1,
+  "workload": "SaschaWillems_Vulkan",
+  "defaults": {
+    "execution_profile": "megakernel",
+    "build_dir": "build",
+    "width": 160,
+    "height": 96,
+    "benchmark_frames": 1,
+    "software_icd": "/usr/share/vulkan/icd.d/lvp_icd.json",
+    "hardware_runners": {
+      "spike": {
+        "kind": "ventus-spike",
+        "mesa_build": "mesa/build-ventus",
+        "llvm_build": "llvm/build",
+        "spike_build": "spike/build",
+        "driver_library": "driver/build/driver/spike_device/libspike_driver.so"
+      }
+    }
+  },
+  "cases": [
+    {
+      "id": "raytracingshadows",
+      "status": "verified",
+      "reason": "Current full-app Spike image evidence and both software/Spike PPM capture paths exist.",
+      "software_capture_env": "RT_SHADOW_SCREENSHOT",
+      "hardware_capture_env": "VENTUS_VK_DUMP_IMAGE"
+    },
+    {
+      "id": "raytracingsbtdata",
+      "status": "candidate",
+      "reason": "Exercises shader binding-table record selection; capture hooks exist and must be revalidated on every RT ABI change.",
+      "software_capture_env": "RT_SHADOW_SCREENSHOT",
+      "hardware_capture_env": "VENTUS_VK_DUMP_IMAGE"
+    },
+    {
+      "id": "raytracingintersection",
+      "status": "candidate",
+      "reason": "Exercises procedural AABB and reportIntersectionEXT; capture hooks exist and this is required coverage for RT hit-record changes.",
+      "software_capture_env": "RT_STORAGE_SCREENSHOT",
+      "hardware_capture_env": "VENTUS_VK_DUMP_IMAGE"
+    },
+    {
+      "id": "raytracingbasic",
+      "status": "candidate",
+      "reason": "Executable exists, but the application has no software storage-image readback hook. Do not claim image correctness until one is added.",
+      "hardware_capture_env": "VENTUS_VK_DUMP_IMAGE"
+    },
+    {
+      "id": "raytracingreflections",
+      "status": "candidate",
+      "reason": "Exercises recursive ray payload/state with a current executable and storage-image capture hook.",
+      "software_capture_env": "RT_STORAGE_SCREENSHOT",
+      "hardware_capture_env": "VENTUS_VK_DUMP_IMAGE"
+    },
+    {
+      "id": "raytracingtextures",
+      "status": "candidate",
+      "reason": "Exercises non-opaque triangle any-hit through alpha masking; capture hooks exist.",
+      "max_abs_error": 1,
+      "software_capture_env": "RT_STORAGE_SCREENSHOT",
+      "hardware_capture_env": "VENTUS_VK_DUMP_IMAGE"
+    }
+  ]
+}
