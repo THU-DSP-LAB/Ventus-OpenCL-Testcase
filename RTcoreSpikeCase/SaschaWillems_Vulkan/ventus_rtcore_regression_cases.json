@@ -41,12 +41,6 @@
       "hardware_capture_env": "VENTUS_VK_DUMP_IMAGE"
     },
     {
-      "id": "raytracingbasic",
-      "status": "candidate",
-      "reason": "Executable exists, but the application has no software storage-image readback hook. Do not claim image correctness until one is added.",
-      "hardware_capture_env": "VENTUS_VK_DUMP_IMAGE"
-    },
-    {
       "id": "raytracingreflections",
       "status": "candidate",
       "reason": "Exercises recursive ray payload/state with a current executable and storage-image capture hook.",

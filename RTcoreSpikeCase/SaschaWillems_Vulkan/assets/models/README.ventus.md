@@ -1,91 +1,30 @@
-Ventus ray-tracing assets
-================================
+# Maintained RT assets
 
-Vendored upstream ray-tracing assets
------------------------------------
+Only assets required by the maintained five-case image regression belong here.
 
-The Ventus testcase intentionally vendors the small set of upstream assets
-needed by its checked-in ray-tracing examples.  This avoids a nested assets
-submodule and makes a checkout sufficient for deterministic full-app tests.
-
-Complete RT asset closure
--------------------------
-
-All runtime assets referenced by the checked-in hardware ray-tracing examples
-were restored from `SaschaWillems/Vulkan-Assets` commit
-`a27c0e584434d59b7c7a714e9180eefca6f0ec4b`, the assets revision pinned by
-the matching upstream `SaschaWillems/Vulkan` source.  They are intentionally
-tracked as ordinary testcase files, not as a submodule:
-
-| Example | Vendored runtime path |
+| Case | Runtime asset |
 | --- | --- |
-| `raytracingtextures` | `assets/textures/gratefloor_rgba.ktx` |
-| `raytracingreflections` | `assets/models/reflection_scene.gltf` |
-| `raytracingshadows` | `assets/models/vulkanscene_shadow.gltf` |
-| `raytracingpositionfetch` | `assets/models/treasure_smooth.gltf` |
-| `raytracinggltf` | `assets/models/FlightHelmet/` (glTF, binary buffer, and textures) |
+| raytracingshadows | models/vulkanscene_shadow.gltf |
+| raytracingreflections | models/reflection_scene.gltf |
+| raytracingtextures | textures/gratefloor_rgba.ktx |
 
-The other checked-in RT examples create their geometry procedurally and have
-no external runtime asset dependency.  The imported closure is 61 MiB.  Run
-an example against these local assets with its existing resource-path option:
+Intersection and sbtdata construct their geometry procedurally.
+FlightHelmet and treasure_smooth belong to examples outside this regression
+and are not maintained inputs.
 
-```sh
-./build/bin/raytracingtextures --resourcepath "$(pwd)"
-```
+Upstream assets originate from SaschaWillems/Vulkan-Assets commit
+`a27c0e584434d59b7c7a714e9180eefca6f0ec4b`.
+Keep the associated license notices when updating assets.
 
-The full-app Spike runner accepts the same option through `APP_ARGS`, e.g.:
+The reflections glTF embeds its dependencies:
+SHA-256 `d20d0fb6ba02333b37f77f4fef576c1748eaa138a588654643196fb859325585`,
+size 1095444 bytes. Do not replace it with a simplified scene when measuring
+recursive reflection behavior.
 
-```sh
-APP=build/bin/raytracingtextures \
-APP_ARGS="--resourcepath $(pwd)" \
-tools/rtcore/run_full_app_spike.sh
-```
+The optional Ventus smoke fixture vulkanscene_shadow_minimal.gltf contains
+only a two-triangle rectangle. Select it explicitly with RT_SHADOW_ASSET;
+leave that variable unset for the full default scene.
 
-`reflection_scene.gltf` is the complete scene used by the real
-`raytracingreflections` sample.  It was restored from:
-
-- `SaschaWillems/Vulkan-Assets` commit
-  `a27c0e584434d59b7c7a714e9180eefca6f0ec4b`
-- source `https://github.com/SaschaWillems/Vulkan-Assets`
-- upstream path `models/reflection_scene.gltf`
-- git blob `86526ae4184c594556a1bbe49dc6c044667ee2bf`
-- SHA-256 `d20d0fb6ba02333b37f77f4fef576c1748eaa138a588654643196fb859325585`
-- byte size `1095444`
-
-The glTF embeds its geometry and images in data URIs, so this one tracked file
-is the full dependency closure.  If it is refreshed, update all five
-provenance fields above and verify it before committing:
-
-```sh
-sha256sum assets/models/reflection_scene.gltf
-test "$(wc -c < assets/models/reflection_scene.gltf)" = 1095444
-test "$(git hash-object assets/models/reflection_scene.gltf)" = \
-  86526ae4184c594556a1bbe49dc6c044667ee2bf
-```
-
-Do not replace this scene with a minimal hand-authored asset: its recursive
-reflection loop is the full-app CPS/continuation regression target.
-
-raytracingshadows assets
-===============================
-
-`vulkanscene_shadow.gltf` is the upstream SaschaWillems shadow scene used by
-the real `raytracingshadows` sample. It was restored from:
-
-- `SaschaWillems/Vulkan-Assets` commit
-  `a27c0e584434d59b7c7a714e9180eefca6f0ec4b`
-
-`vulkanscene_shadow_minimal.gltf` is the small Ventus smoke-test asset that was
-previously installed as `vulkanscene_shadow.gltf`. It contains only a single
-two-triangle rectangle, so reference images from this asset are expected to be a
-dark blue background with a flat colored rectangle rather than the full shadow
-scene.
-
-Use the smoke asset explicitly when debugging ABI, SBT, payload, image format,
-or basic hit/miss behavior:
-
-```sh
-RT_SHADOW_ASSET=/path/to/vulkanscene_shadow_minimal.gltf ./raytracingshadows
-```
-
-Leave `RT_SHADOW_ASSET` unset for the restored upstream scene.
+Run regressions from the ventus-env root using tools/rtcore.py regression.
+Preparation, application builds and generated shaders are managed by
+build-ventus.sh --build rt-workload.
