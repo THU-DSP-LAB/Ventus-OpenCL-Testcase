@@ -4,8 +4,8 @@
   "defaults": {
     "execution_profile": "megakernel",
     "build_dir": "build",
-    "width": 160,
-    "height": 96,
+    "width": 16,
+    "height": 9,
     "benchmark_frames": 1,
     "software_icd": "/usr/share/vulkan/icd.d/lvp_icd.json",
     "hardware_runners": {
@@ -21,36 +21,31 @@
   "cases": [
     {
       "id": "raytracingshadows",
-      "status": "verified",
-      "reason": "Current full-app Spike image evidence and both software/Spike PPM capture paths exist.",
+      "description": "Opaque triangles and shadow rays.",
       "software_capture_env": "RT_SHADOW_SCREENSHOT",
       "hardware_capture_env": "VENTUS_VK_DUMP_IMAGE"
     },
     {
       "id": "raytracingsbtdata",
-      "status": "candidate",
-      "reason": "Exercises shader binding-table record selection; capture hooks exist and must be revalidated on every RT ABI change.",
+      "description": "Shader binding-table record selection.",
       "software_capture_env": "RT_SHADOW_SCREENSHOT",
       "hardware_capture_env": "VENTUS_VK_DUMP_IMAGE"
     },
     {
       "id": "raytracingintersection",
-      "status": "candidate",
-      "reason": "Exercises procedural AABB and reportIntersectionEXT; capture hooks exist and this is required coverage for RT hit-record changes.",
+      "description": "Procedural AABB and reportIntersectionEXT.",
       "software_capture_env": "RT_STORAGE_SCREENSHOT",
       "hardware_capture_env": "VENTUS_VK_DUMP_IMAGE"
     },
     {
       "id": "raytracingreflections",
-      "status": "candidate",
-      "reason": "Exercises recursive ray payload/state with a current executable and storage-image capture hook.",
+      "description": "Recursive ray payload and reflection state.",
       "software_capture_env": "RT_STORAGE_SCREENSHOT",
       "hardware_capture_env": "VENTUS_VK_DUMP_IMAGE"
     },
     {
       "id": "raytracingtextures",
-      "status": "candidate",
-      "reason": "Exercises non-opaque triangle any-hit through alpha masking; capture hooks exist.",
+      "description": "Non-opaque triangle any-hit with alpha masking.",
       "max_abs_error": 1,
       "software_capture_env": "RT_STORAGE_SCREENSHOT",
       "hardware_capture_env": "VENTUS_VK_DUMP_IMAGE"
