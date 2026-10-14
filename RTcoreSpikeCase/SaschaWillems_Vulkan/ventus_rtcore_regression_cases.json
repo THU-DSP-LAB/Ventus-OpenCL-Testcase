@@ -1,0 +1,54 @@
+{
+  "version": 1,
+  "workload": "SaschaWillems_Vulkan",
+  "defaults": {
+    "execution_profile": "megakernel",
+    "build_dir": "build",
+    "width": 16,
+    "height": 9,
+    "benchmark_frames": 1,
+    "software_icd": "/usr/share/vulkan/icd.d/lvp_icd.json",
+    "hardware_runners": {
+      "spike": {
+        "kind": "ventus-spike",
+        "mesa_build": "mesa/build-ventus",
+        "llvm_build": "llvm/build",
+        "spike_build": "spike/build",
+        "driver_library": "driver/build/driver/spike_device/libspike_driver.so"
+      }
+    }
+  },
+  "cases": [
+    {
+      "id": "raytracingshadows",
+      "description": "Opaque triangles and shadow rays.",
+      "software_capture_env": "RT_SHADOW_SCREENSHOT",
+      "hardware_capture_env": "VENTUS_VK_DUMP_IMAGE"
+    },
+    {
+      "id": "raytracingsbtdata",
+      "description": "Shader binding-table record selection.",
+      "software_capture_env": "RT_SHADOW_SCREENSHOT",
+      "hardware_capture_env": "VENTUS_VK_DUMP_IMAGE"
+    },
+    {
+      "id": "raytracingintersection",
+      "description": "Procedural AABB and reportIntersectionEXT.",
+      "software_capture_env": "RT_STORAGE_SCREENSHOT",
+      "hardware_capture_env": "VENTUS_VK_DUMP_IMAGE"
+    },
+    {
+      "id": "raytracingreflections",
+      "description": "Recursive ray payload and reflection state.",
+      "software_capture_env": "RT_STORAGE_SCREENSHOT",
+      "hardware_capture_env": "VENTUS_VK_DUMP_IMAGE"
+    },
+    {
+      "id": "raytracingtextures",
+      "description": "Non-opaque triangle any-hit with alpha masking.",
+      "max_abs_error": 1,
+      "software_capture_env": "RT_STORAGE_SCREENSHOT",
+      "hardware_capture_env": "VENTUS_VK_DUMP_IMAGE"
+    }
+  ]
+}
